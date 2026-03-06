@@ -143,7 +143,7 @@ class DataManager:
 
     @staticmethod
     def assign_zone(vessel_id):
-        """Maps a vessel to its zone using BALANCED_ZONES."""
+        """Maps a vessel to its zone using ZONE_TO_VESSELS."""
         for zone, vessels in DataManager.ZONE_TO_VESSELS.items():
             if vessel_id in vessels:
                 return zone
@@ -180,7 +180,6 @@ class ProcessorUtils:
     def get_random_value(data_dict, vessel_id, beta):
         """Generates reading with potential error controlled by beta."""
         if vessel_id not in data_dict:
-            # Random fallback if ID missing in selected dataset
             chosen_id = random.choice(list(data_dict.keys()))
         elif random.random() < beta:
             available_ids = list(data_dict.keys())
@@ -219,3 +218,50 @@ class StatsUtils:
         t = p_valid - 0.5
         prob_failure_bound = math.exp(-2 * n_adj * (t ** 2))
         return max(0.0, 1 - prob_failure_bound) * 100
+    
+class EnergyModel:
+    """
+    Physical implementation of the Idling-Aware Wake-Up Model (ETWU) 
+    and Non-linear Energy Harvesting.
+    """
+    def __init__(self, e_max=800e-12, e_off=20e-12, e_on=100e-12):
+        self.C_cap = 9e-9          
+        self.V_g = 0.42            
+        self.delta_Q = 6e-12       
+        self.vibration_freq = 150   
+        self.E_max = e_max         
+        self.E_off = e_off         
+        self.E_on = e_on           
+        self.E_tx_pulse = 0.5e-12    
+        self.E_rx_pulse = 0.05e-12  
+        self.packet_bits = 128     
+        self.idle_drain_per_sec = 0.1e-12 
+
+    def get_current_cycles(self, energy):
+        """Calculates charging curve position."""
+        if energy >= self.E_max: return float('inf')
+        if energy <= 0: return 0
+        try:
+            inner = 1 - math.sqrt((2 * energy) / (self.C_cap * (self.V_g**2)))
+            if inner <= 0: return float('inf')
+            cycles = math.ceil((-self.V_g * self.C_cap / self.delta_Q) * math.log(inner))
+            return max(0, cycles)
+        except ValueError:
+            return 0
+
+    def harvest_energy(self, current_energy, delta_t):
+        """Adds energy based on non-linear harvesting."""
+        if current_energy >= self.E_max: return self.E_max
+        cycles_passed = int(delta_t * self.vibration_freq)
+        if cycles_passed == 0: return current_energy
+        current_cycles = self.get_current_cycles(current_energy)
+        if current_cycles == float('inf'): return self.E_max
+        new_cycles = current_cycles + cycles_passed
+        new_energy = 0.5 * self.C_cap * (self.V_g * (1 - math.exp(- (new_cycles * self.delta_Q) / (self.V_g * self.C_cap))))**2
+        return min(new_energy, self.E_max)
+        
+    def active_consumption(self):
+        """Deducts energy for 128-bit TS-OOK packet."""
+        tx_cost = self.packet_bits * 0.5 * self.E_tx_pulse
+        rx_cost = self.packet_bits * 0.5 * self.E_rx_pulse
+        return tx_cost + rx_cost
