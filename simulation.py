@@ -147,7 +147,7 @@ def run_simulation_energy(alpha, beta, param, mode='zone'):
         
         if delta_t > 0:
             state['energy'] = energy_model.harvest_energy(state['energy'], delta_t)
-            state['energy'] = max(0, state['energy'] - (energy_model.idle_drain_per_sec * delta_t))
+            state['energy'] = max(0, state['energy'] - energy_model.action_consumption(param))
             
         if state['energy'] <= energy_model.E_off: state['is_awake'] = False
         elif state['energy'] >= energy_model.E_on: state['is_awake'] = True
@@ -225,7 +225,7 @@ def run_simulation_ts_energy(alpha, beta, param, target_confidence=70.0, mode='z
         state['last_time'] = t
         if delta_t > 0:
             state['energy'] = energy_model.harvest_energy(state['energy'], delta_t)
-            state['energy'] = max(0, state['energy'] - (energy_model.idle_drain_per_sec * delta_t))
+            state['energy'] = max(0, state['energy'] - energy_model.action_consumption(param))
             
         if state['energy'] <= energy_model.E_off: state['is_awake'] = False
         elif state['energy'] >= energy_model.E_on: state['is_awake'] = True

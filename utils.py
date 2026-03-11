@@ -224,18 +224,28 @@ class EnergyModel:
     Physical implementation of the Idling-Aware Wake-Up Model (ETWU) 
     and Non-linear Energy Harvesting.
     """
-    def __init__(self, e_max=800e-12, e_off=20e-12, e_on=100e-12):
-        self.C_cap = 9e-9          
-        self.V_g = 0.42            
-        self.delta_Q = 6e-12       
-        self.vibration_freq = 150   
-        self.E_max = e_max         
-        self.E_off = e_off         
-        self.E_on = e_on           
-        self.E_tx_pulse = 0.5e-12    
-        self.E_rx_pulse = 0.05e-12  
-        self.packet_bits = 128     
-        self.idle_drain_per_sec = 0.1e-12 
+    def __init__(self, e_max=800e-12, e_off=40e-12):
+        # --- Harvesting Hardware Constants ---
+        self.C_cap = 9e-9           # 9 nF ultra-nanocapacitor 
+        self.V_g = 0.42             # 0.42 V generator voltage 
+        self.delta_Q = 6e-12        # 6 pC harvested per cycle 
+        self.vibration_freq = 50    # 50 Hz ambient vibration (1 / 20 ms cycle) 
+        
+        # --- Operational Limits ---
+        self.E_max = e_max          # 800 pJ max capacity 
+        self.E_off = e_off          # 40 pJ turn-off threshold          
+        self.E_on = 59.2e-12        # 59.2 pJ static turn-on baseline
+        
+        # --- Active TS-OOK Consumption ---
+        self.E_tx_pulse = 1e-12     # 1 pJ per transmitted pulse ('1') 
+        self.E_rx_pulse = 0.1e-12   # 0.1 pJ per received pulse ('1') 
+        
+        # --- Idling ---
+        self.idle_drain_per_sec = 1e-12  # 1 pJ per second
+
+        # --- Sensing & Payload Parameters ---
+        self.E_sense_base = 0.5e-12 # 0.5 pJ placeholder for sensing hardware cost
+        self.header_bits = 32       # Standard packet header size
 
     def get_current_cycles(self, energy):
         """Calculates charging curve position."""
@@ -260,8 +270,40 @@ class EnergyModel:
         new_energy = 0.5 * self.C_cap * (self.V_g * (1 - math.exp(- (new_cycles * self.delta_Q) / (self.V_g * self.C_cap))))**2
         return min(new_energy, self.E_max)
         
-    def active_consumption(self):
-        """Deducts energy for 128-bit TS-OOK packet."""
-        tx_cost = self.packet_bits * 0.5 * self.E_tx_pulse
-        rx_cost = self.packet_bits * 0.5 * self.E_rx_pulse
-        return tx_cost + rx_cost
+    def get_payload_size(self, param_type):
+        """Returns the specific bit-size required for the physiological data payload."""
+        if param_type == 'ph':
+            return 8   # pH is a narrow range (e.g., 7.35-7.45), needs few bits
+        elif param_type == 'so2':
+            return 8   # Oxygenation is a percentage (0-100)
+        elif param_type == 'temp':
+            return 16  # Temperature needs slightly more precision
+        elif param_type == 'press':
+            return 32  # Blood pressure might need float precision
+        else:
+            return 32  # Default
+
+    def get_sensing_cost(self, param_type):
+        """Returns the SotA physical energy cost to activate the specific sensor."""
+        if param_type == 'ph':
+            return 1.5e-12      # 1.5 pJ
+        elif param_type == 'temp':
+            return 97.64e-12    # 97,64 pJ
+        elif param_type == 'press':
+            return 836e-12      # 836 pJ
+        elif param_type == 'so2':   
+            return 48e-6    # 48 uJ
+        else:
+            return 0.5e-12
+
+    def action_consumption(self, param_type):
+        """Calculates the total energy to wake up, sense, and transmit."""
+        # 1. Dynamic cost of physically reading the environment
+        sensing_cost = self.get_sensing_cost(param_type)
+        
+        # 2. Cost of transmitting the data via TS-OOK
+        N_data = self.get_payload_size(param_type)
+        N_bits = self.header_bits + N_data
+        tx_cost = N_bits * 0.5 * self.E_tx_pulse 
+        
+        return sensing_cost + tx_cost
