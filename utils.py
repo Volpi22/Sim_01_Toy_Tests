@@ -283,7 +283,8 @@ class EnergyModel:
         else:
             return 32  # Default
 
-    def get_sensing_cost(self, param_type):
+    # Need to figure out a % reduction of the energy cost of sensing
+    def get_sensing_cost(self, param_type): 
         """Returns the SotA physical energy cost to activate the specific sensor."""
         if param_type == 'ph':
             return 1.5e-12      # 1.5 pJ

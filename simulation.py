@@ -165,7 +165,7 @@ def run_simulation_energy(alpha, beta, param, mode='zone'):
                 if mode == 'zone': entry['Zone'] = DataManager.assign_zone(vessel)
                 valid_samples.append(entry)
                 
-                state['energy'] = max(0, state['energy'] - energy_model.active_consumption())
+                state['energy'] = max(0, state['energy'] - energy_model.action_consumption(param))
                 state['has_sampled_this_cycle'] = True
                 if state['energy'] <= energy_model.E_off: state['is_awake'] = False
                 
@@ -230,7 +230,7 @@ def run_simulation_ts_energy(alpha, beta, param, target_confidence=70.0, mode='z
         if state['energy'] <= energy_model.E_off: state['is_awake'] = False
         elif state['energy'] >= energy_model.E_on: state['is_awake'] = True
         
-        # EDGE DETECTION: Only reset the cycle when ENTERING Vessel 2
+        # EDGE DETECTION: Only reset the cycle when entering Vessel 2
         if vessel == 2 and state['previous_vessel'] != 2: 
             state['has_sampled_this_cycle'] = False
             
@@ -243,7 +243,7 @@ def run_simulation_ts_energy(alpha, beta, param, target_confidence=70.0, mode='z
                 if key not in buffers: buffers[key] = []
                 buffers[key].append(val)
                 
-                state['energy'] = max(0, state['energy'] - energy_model.active_consumption())
+                state['energy'] = max(0, state['energy'] - energy_model.action_consumption(param))
                 state['has_sampled_this_cycle'] = True
                 if state['energy'] <= energy_model.E_off: state['is_awake'] = False
                 
