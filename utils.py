@@ -141,6 +141,21 @@ class DataManager:
         """Returns the specific parameter dictionary."""
         return self.datasets.get(param_key.lower())
 
+    def get_decimal_precision(self, param_type):
+        """
+        Maps the parameter to its decimal rounding precision 
+        based on the payload bit-size constraints.
+        """
+        if param_type == 'so2':
+            return 0  # 8 bits: 0-100% integer
+        elif param_type == 'ph':
+            return 2  # 8 bits: ~7.35 (narrow range fits in 256 discrete values)
+        elif param_type == 'temp':
+            return 3  # 16 bits: fractional precision
+        elif param_type == 'press':
+            return 4  # 32 bits: high-resolution floating point
+        return 3
+
     @staticmethod
     def assign_zone(vessel_id):
         """Maps a vessel to its zone using ZONE_TO_VESSELS."""
@@ -283,19 +298,18 @@ class EnergyModel:
         else:
             return 32  # Default
 
-    # Need to figure out a % reduction of the energy cost of sensing
     def get_sensing_cost(self, param_type): 
-        """Returns the SotA physical energy cost to activate the specific sensor."""
+        """Returns the theoretical nanoscale physical energy cost to activate the specific sensor."""
         if param_type == 'ph':
-            return 1.5e-12      # 1.5 pJ
+            return 1.5e-15      # 1.5 fJ (femtojoules)
         elif param_type == 'temp':
-            return 97.64e-12    # 97,64 pJ
+            return 97.64e-15    # 97.64 fJ
         elif param_type == 'press':
-            return 836e-12      # 836 pJ
+            return 836e-15      # 836 fJ
         elif param_type == 'so2':   
-            return 48e-6    # 48 uJ
+            return 48e-9        # 48 nJ (nanojoules)
         else:
-            return 0.5e-12
+            return 0.5e-15      # 0.5 fJ default
 
     def action_consumption(self, param_type):
         """Calculates the total energy to wake up, sense, and transmit."""

@@ -22,6 +22,7 @@ def run_simulation_random(alpha, beta, param, mode='zone'):
     """
     dm = DataManager()
     data_dict = dm.get_data_dict(param)
+    precision = dm.get_decimal_precision(param)
     
     if not data_dict:
         print(f"Error: '{param}' data not found.")
@@ -54,7 +55,7 @@ def run_simulation_random(alpha, beta, param, mode='zone'):
             break
 
     results.rename(columns={'Value': 'Median_Val', 'Selected_Vessel': 'Count', 'Nanobot_ID': 'Count'}, inplace=True)
-    results['Median_Val'] = results['Median_Val'].round(3)
+    results['Median_Val'] = results['Median_Val'].round(precision)
     
     # Statistical Confidence Calculations
     results['Binomial_%'] = results['Count'].apply(lambda n: StatsUtils.obtain_confidence_binomial(alpha, beta, n))
@@ -69,6 +70,7 @@ def run_simulation_ts_random(alpha, beta, param, target_confidence=70.0, mode='z
     """
     dm = DataManager()
     data_dict = dm.get_data_dict(param)
+    precision = dm.get_decimal_precision(param)
     if not data_dict: return None
 
     df = load_data('position_data.csv')
@@ -102,7 +104,8 @@ def run_simulation_ts_random(alpha, beta, param, target_confidence=70.0, mode='z
                     final_results.append({
                         'Sample_ID': sample_id, 'Time_Seconds_End': t,
                         ('Zone' if mode == 'zone' else 'Selected_Vessel'): k,
-                        'Median_Val': round(pd.Series(vals).median(), 3), 'Count': n,
+                        'Median_Val': round(pd.Series(vals).median(), precision),
+                        'Count': n,
                         'Binomial_%': get_conf(n),
                         'Hoeffding_%': StatsUtils.obtain_confidence_hoeffding(alpha, beta, n)
                     })
@@ -118,6 +121,7 @@ def run_simulation_energy(alpha, beta, param, mode='zone'):
     """Simulates sampling cycles driven by the physical Energy Model."""
     dm = DataManager()
     data_dict = dm.get_data_dict(param)
+    precision = dm.get_decimal_precision(param)
     if not data_dict: return None
 
     df = load_data('position_data.csv')
@@ -180,7 +184,7 @@ def run_simulation_energy(alpha, beta, param, mode='zone'):
     
     results = sim_df.groupby(group_col).agg({'Value': 'median', count_col: 'count'}).reset_index()
     results.rename(columns={'Value': 'Median_Val', count_col: 'Count'}, inplace=True)
-    results['Median_Val'] = results['Median_Val'].round(3)
+    results['Median_Val'] = results['Median_Val'].round(precision)
     results['Binomial_%'] = results['Count'].apply(lambda n: StatsUtils.obtain_confidence_binomial(alpha, beta, n))
     results['Hoeffding_%'] = results['Count'].apply(lambda n: StatsUtils.obtain_confidence_hoeffding(alpha, beta, n))
     
@@ -190,6 +194,7 @@ def run_simulation_ts_energy(alpha, beta, param, target_confidence=70.0, mode='z
     """Time-series aggregation driven by physical energy constraints."""
     dm = DataManager()
     data_dict = dm.get_data_dict(param)
+    precision = dm.get_decimal_precision(param)
     if not data_dict: return None
 
     df = load_data('position_data.csv')
@@ -254,7 +259,8 @@ def run_simulation_ts_energy(alpha, beta, param, target_confidence=70.0, mode='z
                             final_results.append({
                                 'Sample_ID': sample_id, 'Time_Seconds_End': t,
                                 ('Zone' if mode == 'zone' else 'Selected_Vessel'): k, 
-                                'Median_Val': round(pd.Series(vals).median(), 3), 'Count': n,
+                                'Median_Val': round(pd.Series(vals).median(), precision),
+                                'Count': n,
                                 'Binomial_%': get_conf(n),
                                 'Hoeffding_%': StatsUtils.obtain_confidence_hoeffding(alpha, beta, n)
                             })
@@ -283,13 +289,13 @@ if __name__ == "__main__":
     if args.energy:
         if args.mode == "zone": report = run_simulation_energy(args.alpha, args.beta, args.param, 'zone')
         elif args.mode == "long": report = run_simulation_energy(args.alpha, args.beta, args.param, 'long')
-        elif args.mode == "ts_zone": report = run_simulation_ts_energy(args.alpha, args.beta, args.param, mode='zone')
-        elif args.mode == "ts_long": report = run_simulation_ts_energy(args.alpha, args.beta, args.param, mode='long')
+        elif args.mode == "ts_zone": report = run_simulation_ts_energy(args.alpha, args.beta, args.param, target_confidence=70.0, mode='zone')
+        elif args.mode == "ts_long": report = run_simulation_ts_energy(args.alpha, args.beta, args.param, target_confidence=70.0, mode='long')
     else:
         if args.mode == "zone": report = run_simulation_random(args.alpha, args.beta, args.param, 'zone')
         elif args.mode == "long": report = run_simulation_random(args.alpha, args.beta, args.param, 'long')
-        elif args.mode == "ts_zone": report = run_simulation_ts_random(args.alpha, args.beta, args.param, mode='zone')
-        elif args.mode == "ts_long": report = run_simulation_ts_random(args.alpha, args.beta, args.param, mode='long')
+        elif args.mode == "ts_zone": report = run_simulation_ts_random(args.alpha, args.beta, args.param, target_confidence=70.0, mode='zone')
+        elif args.mode == "ts_long": report = run_simulation_ts_random(args.alpha, args.beta, args.param, target_confidence=70.0, mode='long')
         
     if report is not None:
         print(report.to_string(index=False))
