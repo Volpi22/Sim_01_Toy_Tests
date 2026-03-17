@@ -9,45 +9,15 @@ class DataManager:
     
     # Accurate zone mapping
     ZONE_TO_VESSELS = {
-    1: [2], 
-    2: [61, 94], 
-    3: [57, 58], 
-    4: [1, 3, 4, 8, 13, 18, 24],
-    5: [19, 26, 31, 34], 
-    6: [6, 7], 
-    7: [9], 
-    8: [81, 83],
-    9: [5, 10, 11, 12, 14, 15, 16, 17, 20, 21, 22, 23, 27, 28, 29, 33], 
-    10: [64, 65, 68, 69, 74, 75, 80, 82],
-    11: [25, 32, 35, 37], 
-    12: [30, 39], 
-    13: [76, 77, 84], 
-    14: [36],
-    15: [90], 
-    16: [40, 86], 
-    17: [38, 41, 42, 43, 44, 45, 46],
-    18: [48, 50, 53, 55], 
-    19: [47, 49, 51, 52, 54, 56, 59, 60],
-    20: [62, 63, 66, 67, 70, 71, 72, 73, 78, 79, 85, 87, 88, 89, 91, 92, 93]
-}
-
-    # Balanced zone mapping
-    BALANCED_ZONES ={
-    1: [1, 2, 57, 58, 61, 94],
-    2: [3, 4, 8, 10, 12, 13, 18],
-    3: [5, 6, 14, 16, 20, 22, 28],
-    4: [7, 9, 64, 65, 80, 81, 82, 83],
-    5: [25, 32, 35, 36, 37, 76, 77],
-    6: [15, 17, 39, 40, 74, 75, 86],
-    7: [38, 41, 42, 43, 44, 45, 46],
-    8: [47, 49, 51, 52, 54, 56],
-    9: [48, 50, 53, 55, 59, 60],
-    10: [62, 63, 66, 67, 68, 69, 70, 71],
-    11: [72, 73, 78, 79, 85, 87],
-    12: [88, 89, 90, 91, 92, 93],
-    13: [19, 26, 30, 31, 34, 84],
-    14: [11, 21, 23, 24, 27, 29, 33]
-}
+        1: [2], 2: [61, 94], 3: [57, 58], 4: [1, 3, 4, 8, 13, 18, 24],
+        5: [19, 26, 31, 34], 6: [6, 7], 7: [9], 8: [81, 83],
+        9: [5, 10, 11, 12, 14, 15, 16, 17, 20, 21, 22, 23, 27, 28, 29, 33], 
+        10: [64, 65, 68, 69, 74, 75, 80, 82], 11: [25, 32, 35, 37], 12: [30, 39], 
+        13: [76, 77, 84], 14: [36], 15: [90], 16: [40, 86], 
+        17: [38, 41, 42, 43, 44, 45, 46], 18: [48, 50, 53, 55], 
+        19: [47, 49, 51, 52, 54, 56, 59, 60],
+        20: [62, 63, 66, 67, 70, 71, 72, 73, 78, 79, 85, 87, 88, 89, 91, 92, 93]
+    }
 
     def __init__(self):
         # Full physiological data
@@ -142,38 +112,26 @@ class DataManager:
         return self.datasets.get(param_key.lower())
 
     def get_decimal_precision(self, param_type):
-        """
-        Maps the parameter to its decimal rounding precision 
-        based on the payload bit-size constraints.
-        """
-        if param_type == 'so2':
-            return 0  # 8 bits: 0-100% integer
-        elif param_type == 'ph':
-            return 2  # 8 bits: ~7.35 (narrow range fits in 256 discrete values)
-        elif param_type == 'temp':
-            return 3  # 16 bits: fractional precision
-        elif param_type == 'press':
-            return 4  # 32 bits: high-resolution floating point
+        """Maps the parameter to its decimal rounding precision."""
+        if param_type == 'so2': return 0  
+        elif param_type == 'ph': return 2  
+        elif param_type == 'temp': return 3  
+        elif param_type == 'press': return 4  
         return 3
 
     @staticmethod
     def assign_zone(vessel_id):
-        """Maps a vessel to its zone using ZONE_TO_VESSELS."""
         for zone, vessels in DataManager.ZONE_TO_VESSELS.items():
             if vessel_id in vessels:
                 return zone
         return None
 
 class ProcessorUtils:
-    """Methods for data segmentation and sampling."""
-
     @staticmethod
     def split_vessel_ids(row):
-        """Splits vessel ID lists into segments based on heart entry (Vessel 2)."""
         vessel_ids = row['Vessel_ID']
         segments = []
         current_segment = []
-        
         for i, v_id in enumerate(vessel_ids):
             if v_id == 2:
                 if i == 0 or vessel_ids[i-1] != 2:
@@ -183,9 +141,7 @@ class ProcessorUtils:
                     current_segment.append(2)
             else:
                 current_segment.append(v_id)
-        
         if current_segment: segments.append(current_segment)
-        
         return pd.DataFrame({
             'Nanobot_ID': [row['Nanobot_ID']] * len(segments),
             'Vessel_ID': segments
@@ -193,7 +149,6 @@ class ProcessorUtils:
 
     @staticmethod
     def get_random_value(data_dict, vessel_id, beta):
-        """Generates reading with potential error controlled by beta."""
         if vessel_id not in data_dict:
             chosen_id = random.choice(list(data_dict.keys()))
         elif random.random() < beta:
@@ -202,68 +157,50 @@ class ProcessorUtils:
             chosen_id = random.choice(available_ids)
         else:
             chosen_id = vessel_id
-            
         min_val, max_val = data_dict[chosen_id]
         return random.uniform(min_val, max_val)
 
 class StatsUtils:
-    """Probabilistic confidence calculations."""
-
     @staticmethod
     def obtain_confidence_binomial(alpha, beta, n):
-        """Calculates majority voting success using Binomial CDF."""
         if n <= 0: return 0.0
         n_adj = n if n % 2 != 0 else n - 1
         epsilon = alpha + beta - (alpha * beta)
         p_valid = 1 - epsilon
-        
         failure_threshold = math.floor(n_adj / 2)
         prob_failure = binom.cdf(failure_threshold, n_adj, p_valid)
         return (1 - prob_failure) * 100
 
     @staticmethod
     def obtain_confidence_hoeffding(alpha, beta, n):
-        """Calculates bound using Hoeffding's Inequality."""
         if n <= 0: return 0.0
         n_adj = n if n % 2 != 0 else n - 1
         epsilon = alpha + beta - (alpha * beta)
         p_valid = 1 - epsilon
-        
         if p_valid <= 0.5: return 0.0
         t = p_valid - 0.5
         prob_failure_bound = math.exp(-2 * n_adj * (t ** 2))
         return max(0.0, 1 - prob_failure_bound) * 100
     
 class EnergyModel:
-    """
-    Physical implementation of the Idling-Aware Wake-Up Model (ETWU) 
-    and Non-linear Energy Harvesting.
-    """
-    def __init__(self, e_max=800e-12, e_off=40e-12):
-        # --- Harvesting Hardware Constants ---
-        self.C_cap = 9e-9           # 9 nF ultra-nanocapacitor 
-        self.V_g = 0.42             # 0.42 V generator voltage 
-        self.delta_Q = 6e-12        # 6 pC harvested per cycle 
-        self.vibration_freq = 50    # 50 Hz ambient vibration (1 / 20 ms cycle) 
+    def __init__(self, param_type='press', e_max=800e-12, e_off=40e-12):
+        self.C_cap = 9e-9           
+        self.V_g = 0.42             
+        self.delta_Q = 6e-12        
+        self.vibration_freq = 50    
         
-        # --- Operational Limits ---
-        self.E_max = e_max          # 800 pJ max capacity 
-        self.E_off = e_off          # 40 pJ turn-off threshold          
-        self.E_on = 59.2e-12        # 59.2 pJ static turn-on baseline
-        
-        # --- Active TS-OOK Consumption ---
-        self.E_tx_pulse = 1e-12     # 1 pJ per transmitted pulse ('1') 
-        self.E_rx_pulse = 0.1e-12   # 0.1 pJ per received pulse ('1') 
-        
-        # --- Idling ---
-        self.idle_drain_per_sec = 1e-12  # 1 pJ per second
+        self.E_tx_pulse = 1e-12     
+        self.E_rx_pulse = 0.1e-12   
+        self.idle_drain_per_sec = 1e-12  
+        self.header_bits = 32       
 
-        # --- Sensing & Payload Parameters ---
-        self.E_sense_base = 0.5e-12 # 0.5 pJ placeholder for sensing hardware cost
-        self.header_bits = 32       # Standard packet header size
+        self.E_max = e_max          
+        self.E_off = e_off          
+        
+        task_cost = self.action_consumption(param_type)
+        self.E_on = self.E_off + task_cost + 0.1e-12
 
     def get_current_cycles(self, energy):
-        """Calculates charging curve position."""
         if energy >= self.E_max: return float('inf')
         if energy <= 0: return 0
         try:
@@ -275,7 +212,6 @@ class EnergyModel:
             return 0
 
     def harvest_energy(self, current_energy, delta_t):
-        """Adds energy based on non-linear harvesting."""
         if current_energy >= self.E_max: return self.E_max
         cycles_passed = int(delta_t * self.vibration_freq)
         if cycles_passed == 0: return current_energy
@@ -286,39 +222,24 @@ class EnergyModel:
         return min(new_energy, self.E_max)
         
     def get_payload_size(self, param_type):
-        """Returns the specific bit-size required for the physiological data payload."""
-        if param_type == 'ph':
-            return 8   # pH is a narrow range (e.g., 7.35-7.45), needs few bits
-        elif param_type == 'so2':
-            return 8   # Oxygenation is a percentage (0-100)
-        elif param_type == 'temp':
-            return 16  # Temperature needs slightly more precision
-        elif param_type == 'press':
-            return 32  # Blood pressure might need float precision
-        else:
-            return 32  # Default
+        if param_type == 'ph': return 8
+        elif param_type == 'so2': return 8
+        elif param_type == 'temp': return 16
+        elif param_type == 'press': return 32
+        elif param_type == 'combined': return 24 # 8 bits (pH) + 16 bits (Temp)
+        else: return 32
 
     def get_sensing_cost(self, param_type): 
-        """Returns the theoretical nanoscale physical energy cost to activate the specific sensor."""
-        if param_type == 'ph':
-            return 1.5e-15      # 1.5 fJ (femtojoules)
-        elif param_type == 'temp':
-            return 97.64e-15    # 97.64 fJ
-        elif param_type == 'press':
-            return 836e-15      # 836 fJ
-        elif param_type == 'so2':   
-            return 48e-9        # 48 nJ (nanojoules)
-        else:
-            return 0.5e-15      # 0.5 fJ default
+        if param_type == 'ph': return 1.5e-15
+        elif param_type == 'temp': return 97.64e-15
+        elif param_type == 'press': return 836e-15
+        elif param_type == 'so2': return 48e-9
+        elif param_type == 'combined': return 1.5e-15 + 97.64e-15 # 99.14 fJ
+        else: return 0.5e-15
 
     def action_consumption(self, param_type):
-        """Calculates the total energy to wake up, sense, and transmit."""
-        # 1. Dynamic cost of physically reading the environment
         sensing_cost = self.get_sensing_cost(param_type)
-        
-        # 2. Cost of transmitting the data via TS-OOK
         N_data = self.get_payload_size(param_type)
         N_bits = self.header_bits + N_data
         tx_cost = N_bits * 0.5 * self.E_tx_pulse 
-        
         return sensing_cost + tx_cost
