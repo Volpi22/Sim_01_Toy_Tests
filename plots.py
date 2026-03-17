@@ -3,7 +3,7 @@ import math
 import numpy as np
 
 def plot_zone_trends(final_report):
-
+    """Plots a grid of 20 subplots (5 rows x 4 columns) for each zone's median temperature trends."""
     # Get a sorted list of unique zones to ensure they plot in order (1 to 20)
     zones = sorted(final_report['Zone'].dropna().unique())
 

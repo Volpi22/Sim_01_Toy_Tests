@@ -16,6 +16,7 @@ def load_data(input_file):
 # ==========================================
 
 def run_simulation_random(alpha, beta, param, mode='zone'):
+    """Random sampling simulation without energy constraints."""
     dm = DataManager()
     data_dict = dm.get_data_dict(param)
     precision = dm.get_decimal_precision(param)
@@ -49,6 +50,7 @@ def run_simulation_random(alpha, beta, param, mode='zone'):
     return results.sort_values(by='Count', ascending=False)
 
 def run_simulation_ts_random(alpha, beta, param, target_confidence=70.0, mode='zone'):
+    """Time-series random sampling simulation without energy constraints."""
     dm = DataManager()
     data_dict = dm.get_data_dict(param)
     precision = dm.get_decimal_precision(param)
@@ -97,6 +99,7 @@ def run_simulation_ts_random(alpha, beta, param, target_confidence=70.0, mode='z
 # ==========================================
 
 def run_simulation_energy(alpha, beta, param, mode='zone'):
+    """Random sampling simulation with energy constraints."""
     dm = DataManager()
     data_dict = dm.get_data_dict(param)
     precision = dm.get_decimal_precision(param)
@@ -165,6 +168,7 @@ def run_simulation_energy(alpha, beta, param, mode='zone'):
     return results.sort_values(by='Count', ascending=False)
 
 def run_simulation_ts_energy(alpha, beta, param, target_confidence=70.0, mode='zone'):
+    """Time-series random sampling simulation with energy constraints."""
     dm = DataManager()
     data_dict = dm.get_data_dict(param)
     precision = dm.get_decimal_precision(param)
