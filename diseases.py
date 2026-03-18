@@ -1,19 +1,12 @@
 import pandas as pd
 import numpy as np
 import random
-import argparse
 from utils import DataManager, StatsUtils, EnergyModel
 
 class DiseaseSimulator:
     def __init__(self, df_path='position_data.csv'):
         self.dm = DataManager()
         self.df_path = df_path
-        
-        # Determine simulation length to set realistic disease timelines
-        # Assuming a 24h simulation (86400 seconds)
-        # Disease starts at Hour 8, peaks at Hour 16
-        self.t_start = 28800 
-        self.t_peak = 57600  
         
         # Map zones to their constituent vessels for easy lookup
         self.zone_to_vessels = self.dm.ZONE_TO_VESSELS
@@ -51,9 +44,9 @@ class DiseaseSimulator:
             vessels.extend(self.zone_to_vessels.get(z, []))
         return vessels
 
-    def _get_diseased_value(self, data_dict, vessel_id, beta, t, affected_vessels, shift_val):
+    def _get_diseased_value(self, data_dict, vessel_id, beta, t, affected_vessels, shift_val, t_start, t_peak):
         """Generates a value, applying a time-scaled disease shift if applicable."""
-        # 1. Beta Localization Error (Did the bot sample the wrong vessel?)
+        # 1. Beta Localization Error
         if vessel_id not in data_dict:
             chosen_id = random.choice(list(data_dict.keys()))
         elif random.random() < beta:
@@ -67,9 +60,9 @@ class DiseaseSimulator:
         min_val, max_val = data_dict[chosen_id]
         
         # 3. Apply Disease Shift (Only if the *sampled* vessel is diseased)
-        if chosen_id in affected_vessels and t > self.t_start:
+        if chosen_id in affected_vessels and t > t_start:
             # Calculate interpolation factor (0.0 to 1.0)
-            f = min(1.0, (t - self.t_start) / (self.t_peak - self.t_start))
+            f = min(1.0, (t - t_start) / (t_peak - t_start))
             current_shift = shift_val * f
             
             min_val += current_shift
@@ -94,6 +87,16 @@ class DiseaseSimulator:
         df = pd.read_csv(self.df_path, header=None, names=['Nanobot_ID', 'Pos_X', 'Pos_Y', 'Pos_Z', 'Time_Seconds', 'Vessel_ID', 'Stream_ID'])
         df.dropna(inplace=True)
         df.sort_values(by='Time_Seconds', inplace=True)
+        
+        # --- Randomize Disease Timeline ---
+        max_t = df['Time_Seconds'].max()
+        progression_time = 28800  # Takes 8 hours to reach peak severity
+        
+        # Pick a random start time between 0 and (Max Time - 8 hours - 2 hour buffer)
+        # The 2 hour buffer ensures we get at least 6-8 samples at absolute peak severity
+        t_start = random.uniform(0, max(0, max_t - progression_time - 7200))
+        t_peak = t_start + progression_time
+        print(f"[{disease_key}] Random Onset: Hour {t_start/3600:.1f} | Peak: Hour {t_peak/3600:.1f}")
         
         energy_model = EnergyModel(param_type=param)
         bot_states, buffers, final_results, sample_id = {}, {}, [], 1
@@ -124,7 +127,7 @@ class DiseaseSimulator:
                 
             if state['is_awake'] and not state['has_sampled_this_cycle']:
                 if random.random() < 0.05: # Sampling chance
-                    val = self._get_diseased_value(data_dict, vessel, beta, t, affected_vessels, shift_val)
+                    val = self._get_diseased_value(data_dict, vessel, beta, t, affected_vessels, shift_val, t_start, t_peak)
                     key = self.dm.assign_zone(vessel)
                     
                     if key not in buffers: buffers[key] = []
@@ -162,6 +165,13 @@ class DiseaseSimulator:
         df.dropna(inplace=True)
         df.sort_values(by='Time_Seconds', inplace=True)
         
+        # --- Randomize Disease Timeline ---
+        max_t = df['Time_Seconds'].max()
+        progression_time = 28800  # Takes 8 hours to reach peak severity
+        t_start = random.uniform(0, max(0, max_t - progression_time - 7200))
+        t_peak = t_start + progression_time
+        print(f"[{disease_key}] Random Onset: Hour {t_start/3600:.1f} | Peak: Hour {t_peak/3600:.1f}")
+        
         energy_model = EnergyModel(param_type='combined')
         bot_states, buffers, final_results, sample_id = {}, {}, [], 1
         conf_cache = {}
@@ -192,8 +202,8 @@ class DiseaseSimulator:
             if state['is_awake'] and not state['has_sampled_this_cycle']:
                 if random.random() < 0.05:
                     # Get dual values with their respective disease shifts
-                    val_ph = self._get_diseased_value(ph_dict, vessel, beta, t, affected_vessels, ph_shift)
-                    val_temp = self._get_diseased_value(temp_dict, vessel, beta, t, affected_vessels, temp_shift)
+                    val_ph = self._get_diseased_value(ph_dict, vessel, beta, t, affected_vessels, ph_shift, t_start, t_peak)
+                    val_temp = self._get_diseased_value(temp_dict, vessel, beta, t, affected_vessels, temp_shift, t_start, t_peak)
                     
                     key = self.dm.assign_zone(vessel)
                     if key not in buffers: buffers[key] = {'ph': [], 'temp': []}
@@ -221,7 +231,6 @@ class DiseaseSimulator:
 
 if __name__ == "__main__":
     simulator = DiseaseSimulator()
-    
     # 1. Stroke (pH)
     print("Running Stroke Simulation (Zone 7, pH Drop)...")
     stroke_df = simulator.run_single_disease(alpha=0.3, beta=0.1, disease_key='stroke_ph')
