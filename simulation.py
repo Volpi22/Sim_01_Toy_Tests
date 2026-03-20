@@ -212,36 +212,5 @@ class NanobotSimulator:
             'Count': n, 'Binomial_%': self._get_conf(n)
         }
 
-# ==========================================
-# MAIN EXECUTION ROUTER
-# ==========================================
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Medical Nanobot Simulator")
-    parser.add_argument("--alpha", type=float, default=0.05)
-    parser.add_argument("--beta", type=float, default=0.1)
-    parser.add_argument("--param", type=str, default="press", choices=['press', 'ph', 'so2', 'temp', 'combined'])
-    parser.add_argument("--mode", type=str, default="long", choices=['zone', 'long', 'ts_zone', 'ts_long'])
-    parser.add_argument("--energy", action="store_true", help="Enable energy constraints")
-    
-    args = parser.parse_args()
-    sim = NanobotSimulator(args.alpha, args.beta)
-    report = None
-
-    is_ts = args.mode.startswith('ts_')
-    routing_mode = 'zone' if 'zone' in args.mode else 'long'
-
-    if args.param == "combined":
-        if args.energy and is_ts:
-            report = sim.run_combined_energy_ts(mode=routing_mode)
-        else:
-            print("Error: 'combined' mode requires --energy and a TS mode (ts_zone/ts_long).")
-    else:
-        if args.energy:
-            report = sim.run_energy_simulation(args.param, mode=routing_mode, is_timeseries=is_ts)
-        else:
-            # Random sampling doesn't currently have a specific TS logic in original script but follows the static path.
-            report = sim.run_random_static(args.param, mode=routing_mode)
-
-    if report is not None:
-        print(report.to_string(index=False))
+    pass
