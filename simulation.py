@@ -4,332 +4,213 @@ import os
 import random
 from utils import DataManager, ProcessorUtils, StatsUtils, EnergyModel
 
-def load_data(input_file):
-    """Loads CSV and applies standard headers."""
-    cols = ['Nanobot_ID', 'Pos_X', 'Pos_Y', 'Pos_Z', 'Time_Seconds', 'Vessel_ID', 'Stream_ID']
-    if not os.path.exists(input_file):
-        raise FileNotFoundError(f"Missing input: {input_file}")
-    return pd.read_csv(input_file, header=None, names=cols)
+class NanobotSimulator:
+    """
+    A simulator to evaluate nanobot data collection efficiency and statistical 
+    confidence across different physical zones and energy constraints.
+    """
 
-# ==========================================
-# RANDOM SAMPLING SIMULATIONS (NON-ENERGY)
-# ==========================================
+    def __init__(self, alpha=0.05, beta=0.1, target_confidence=70.0):
+        self.alpha = alpha
+        self.beta = beta
+        self.target_confidence = target_confidence
+        self.dm = DataManager()
+        self.input_file = 'position_data.csv'
 
-def run_simulation_random(alpha, beta, param, mode='zone'):
-    """Random sampling simulation without energy constraints."""
-    dm = DataManager()
-    data_dict = dm.get_data_dict(param)
-    precision = dm.get_decimal_precision(param)
-    
-    if not data_dict: return None
+    # --- Data Loading Utility ---
 
-    df = load_data('position_data.csv')
-    df.dropna(inplace=True)
-    
-    grouped = df.groupby('Nanobot_ID', sort=False)['Vessel_ID'].apply(list).reset_index()
-    split_df = pd.concat(grouped.apply(ProcessorUtils.split_vessel_ids, axis=1).values, ignore_index=True)
-    
-    while True:
-        sim_df = split_df.copy()
-        sim_df['Selected_Vessel'] = sim_df['Vessel_ID'].apply(lambda x: random.choice(x))
-        sim_df['Value'] = sim_df['Selected_Vessel'].apply(lambda x: ProcessorUtils.get_random_value(data_dict, x, beta))
+    def _load_data(self):
+        """Loads and prepares the position dataset with standard headers."""
+        cols = ['Nanobot_ID', 'Pos_X', 'Pos_Y', 'Pos_Z', 'Time_Seconds', 'Vessel_ID', 'Stream_ID']
+        if not os.path.exists(self.input_file):
+            raise FileNotFoundError(f"Missing input: {self.input_file}")
         
+        df = pd.read_csv(self.input_file, header=None, names=cols)
+        df.dropna(inplace=True)
+        return df
+
+    # --- Core Energy Logic ---
+
+    def _update_bot_energy(self, state, t, energy_model):
+        """Calculates energy harvesting and idle drain over a time delta."""
+        delta_t = t - state['last_time']
+        state['last_time'] = t
+        
+        if delta_t > 0:
+            # 1. Harvest energy from the environment
+            state['energy'] = energy_model.harvest_energy(state['energy'], delta_t)
+            # 2. Subtract background idle consumption
+            state['energy'] = max(0, state['energy'] - (energy_model.idle_drain_per_sec * delta_t))
+        
+        # Power management: Toggle awake state based on thresholds
+        if state['energy'] <= energy_model.E_off:
+            state['is_awake'] = False
+        elif state['energy'] >= energy_model.E_on:
+            state['is_awake'] = True
+        
+        return state
+
+    # --- Simulation Variants ---
+
+    def run_random_static(self, param, mode='zone'):
+        """Baseline simulation: Random sampling without time or energy constraints."""
+        data_dict = self.dm.get_data_dict(param)
+        precision = self.dm.get_decimal_precision(param)
+        if not data_dict: return None
+
+        df = self._load_data()
+        
+        # Group and split vessel IDs for nanobots traversing multiple vessels
+        grouped = df.groupby('Nanobot_ID', sort=False)['Vessel_ID'].apply(list).reset_index()
+        split_df = pd.concat(grouped.apply(ProcessorUtils.split_vessel_ids, axis=1).values, ignore_index=True)
+        
+        # Sampling loop
+        sim_df = split_df.copy()
+        sim_df['Selected_Vessel'] = sim_df['Vessel_ID'].apply(random.choice)
+        sim_df['Value'] = sim_df['Selected_Vessel'].apply(
+            lambda x: ProcessorUtils.get_random_value(data_dict, x, self.beta)
+        )
+        
+        # Aggregation
+        group_col = 'Zone' if mode == 'zone' else 'Selected_Vessel'
         if mode == 'zone':
             sim_df['Zone'] = sim_df['Selected_Vessel'].apply(DataManager.assign_zone)
-            results = sim_df.groupby('Zone').agg({'Value': 'median', 'Selected_Vessel': 'count'}).reset_index()
-            if len(results) == 20: break
-        else:
-            results = sim_df.groupby('Selected_Vessel').agg({'Value': 'median', 'Nanobot_ID': 'count'}).reset_index()
-            break
-
-    results.rename(columns={'Value': 'Median_Val', 'Selected_Vessel': 'Count', 'Nanobot_ID': 'Count'}, inplace=True)
-    results['Median_Val'] = results['Median_Val'].round(precision)
-    results['Binomial_%'] = results['Count'].apply(lambda n: StatsUtils.obtain_confidence_binomial(alpha, beta, n))
-    results['Hoeffding_%'] = results['Count'].apply(lambda n: StatsUtils.obtain_confidence_hoeffding(alpha, beta, n))
-    
-    return results.sort_values(by='Count', ascending=False)
-
-def run_simulation_ts_random(alpha, beta, param, target_confidence=70.0, mode='zone'):
-    """Time-series random sampling simulation without energy constraints."""
-    dm = DataManager()
-    data_dict = dm.get_data_dict(param)
-    precision = dm.get_decimal_precision(param)
-    if not data_dict: return None
-
-    df = load_data('position_data.csv')
-    df.dropna(inplace=True)
-    df.sort_values(by='Time_Seconds', inplace=True)
-    
-    target_count = 20 if mode == 'zone' else 94
-    conf_cache = {}
-    def get_conf(n):
-        if n not in conf_cache: conf_cache[n] = StatsUtils.obtain_confidence_binomial(alpha, beta, n)
-        return conf_cache[n]
-    
-    buffers, final_results, sample_id = {}, [], 1
-    
-    for row in df.itertuples():
-        vessel, t = row.Vessel_ID, row.Time_Seconds
-        if pd.isna(vessel): continue
         
-        val = ProcessorUtils.get_random_value(data_dict, vessel, beta)
-        key = DataManager.assign_zone(vessel) if mode == 'zone' else vessel
-        
-        if key not in buffers: buffers[key] = []
-        buffers[key].append(val)
-        
-        if len(buffers) == target_count:
-            if all(get_conf(len(vals)) >= target_confidence for vals in buffers.values()):
-                for k, vals in buffers.items():
-                    n = len(vals)
-                    final_results.append({
-                        'Sample_ID': sample_id, 'Time_Seconds_End': t,
-                        ('Zone' if mode == 'zone' else 'Selected_Vessel'): k,
-                        'Median_Val': round(pd.Series(vals).median(), precision),
-                        'Count': n,
-                        'Binomial_%': get_conf(n),
-                        'Hoeffding_%': StatsUtils.obtain_confidence_hoeffding(alpha, beta, n)
-                    })
-                buffers, sample_id = {}, sample_id + 1
-                
-    return pd.DataFrame(final_results)
+        return self._finalize_results(sim_df, group_col, precision)
 
-# ==========================================
-# ENERGY-CONSTRAINED SIMULATIONS (ETWU)
-# ==========================================
+    def run_energy_simulation(self, param, mode='zone', is_timeseries=False):
+        """
+        Energy-aware simulation (ETWU). 
+        Supports both static snapshots and longitudinal time-series (TS) analysis.
+        """
+        data_dict = self.dm.get_data_dict(param)
+        precision = self.dm.get_decimal_precision(param)
+        energy_model = EnergyModel(param_type=param)
+        df = self._load_data().sort_values(by='Time_Seconds')
 
-def run_simulation_energy(alpha, beta, param, mode='zone'):
-    """Random sampling simulation with energy constraints."""
-    dm = DataManager()
-    data_dict = dm.get_data_dict(param)
-    precision = dm.get_decimal_precision(param)
-    if not data_dict: return None
+        bot_states, buffers, final_results = {}, {}, []
+        sample_id, sampling_chance = 1, 0.05
+        target_count = 20 if mode == 'zone' else 94
 
-    df = load_data('position_data.csv')
-    df.dropna(inplace=True)
-    df.sort_values(by=['Time_Seconds'], inplace=True)
-    
-    energy_model = EnergyModel(param_type=param)
-    bot_states, valid_samples = {}, []
-    sampling_chance = 0.05 
-
-    for row in df.itertuples():
-        nid, t, vessel = row.Nanobot_ID, row.Time_Seconds, row.Vessel_ID
-        if pd.isna(vessel): continue
+        for row in df.itertuples():
+            nid, t, vessel = row.Nanobot_ID, row.Time_Seconds, row.Vessel_ID
             
-        if nid not in bot_states:
-            bot_states[nid] = {
-                'energy': energy_model.E_max, 'is_awake': True,
-                'has_sampled_this_cycle': False, 'last_time': t,
-                'previous_vessel': None
-            }
+            # Initialize or update nanobot energy state
+            if nid not in bot_states:
+                bot_states[nid] = {
+                    'energy': energy_model.E_max, 'is_awake': True, 
+                    'has_sampled_this_cycle': False, 'last_time': t, 'previous_vessel': None
+                }
             
-        state = bot_states[nid]
-        delta_t = t - state['last_time']
-        state['last_time'] = t
-        
-        if delta_t > 0:
-            state['energy'] = energy_model.harvest_energy(state['energy'], delta_t)
-            # FIXED BUG: Use idle drain while waiting, NOT action consumption
-            state['energy'] = max(0, state['energy'] - (energy_model.idle_drain_per_sec * delta_t))
+            state = self._update_bot_energy(bot_states[nid], t, energy_model)
             
-        if state['energy'] <= energy_model.E_off: state['is_awake'] = False
-        elif state['energy'] >= energy_model.E_on: state['is_awake'] = True
-        
-        if vessel == 2 and state['previous_vessel'] != 2: 
-            state['has_sampled_this_cycle'] = False
+            # Reset sampling flag if nanobot enters a new vessel
+            if vessel == 2 and state['previous_vessel'] != 2:
+                state['has_sampled_this_cycle'] = False
             
-        if state['is_awake'] and not state['has_sampled_this_cycle']:
-            if random.random() < sampling_chance:
-                val = ProcessorUtils.get_random_value(data_dict, vessel, beta)
-                entry = {'Nanobot_ID': nid, 'Selected_Vessel': vessel, 'Value': val}
-                if mode == 'zone': entry['Zone'] = DataManager.assign_zone(vessel)
-                valid_samples.append(entry)
-                
-                # Deduct the cost only when taking the sample
-                state['energy'] = max(0, state['energy'] - energy_model.action_consumption(param))
-                state['has_sampled_this_cycle'] = True
-                if state['energy'] <= energy_model.E_off: state['is_awake'] = False
-                
-        state['previous_vessel'] = vessel
+            # Attempt to sample if awake and ready
+            if state['is_awake'] and not state['has_sampled_this_cycle']:
+                if random.random() < sampling_chance:
+                    val = ProcessorUtils.get_random_value(data_dict, vessel, self.beta)
+                    key = DataManager.assign_zone(vessel) if mode == 'zone' else vessel
+                    
+                    # Store sample
+                    sample = {'Zone' if mode == 'zone' else 'Selected_Vessel': key, 'Value': val}
+                    if not is_timeseries:
+                        buffers.setdefault('all', []).append(sample)
+                    else:
+                        buffers.setdefault(key, []).append(val)
+                    
+                    # Deduct energy for the active measurement/transmission
+                    state['energy'] = max(0, state['energy'] - energy_model.action_consumption(param))
+                    state['has_sampled_this_cycle'] = True
+                    
+                    # TS logic: Check if we have reached confidence targets across all zones
+                    if is_timeseries and len(buffers) == target_count:
+                        if all(self._get_conf(len(v)) >= self.target_confidence for v in buffers.values()):
+                            for k, vals in buffers.items():
+                                final_results.append(self._format_ts_row(sample_id, t, k, vals, precision, mode))
+                            buffers, sample_id = {}, sample_id + 1
 
-    sim_df = pd.DataFrame(valid_samples)
-    if sim_df.empty: return None
+            state['previous_vessel'] = vessel
 
-    group_col = 'Zone' if mode == 'zone' else 'Selected_Vessel'
-    count_col = 'Selected_Vessel' if mode == 'zone' else 'Nanobot_ID'
-    
-    results = sim_df.groupby(group_col).agg({'Value': 'median', count_col: 'count'}).reset_index()
-    results.rename(columns={'Value': 'Median_Val', count_col: 'Count'}, inplace=True)
-    results['Median_Val'] = results['Median_Val'].round(precision)
-    results['Binomial_%'] = results['Count'].apply(lambda n: StatsUtils.obtain_confidence_binomial(alpha, beta, n))
-    results['Hoeffding_%'] = results['Count'].apply(lambda n: StatsUtils.obtain_confidence_hoeffding(alpha, beta, n))
-    
-    return results.sort_values(by='Count', ascending=False)
+        return pd.DataFrame(final_results) if is_timeseries else self._finalize_results(pd.DataFrame(buffers.get('all', [])), 'Zone' if mode == 'zone' else 'Selected_Vessel', precision)
 
-def run_simulation_ts_energy(alpha, beta, param, target_confidence=70.0, mode='zone'):
-    """Time-series random sampling simulation with energy constraints."""
-    dm = DataManager()
-    data_dict = dm.get_data_dict(param)
-    precision = dm.get_decimal_precision(param)
-    if not data_dict: return None
+    def run_combined_energy_ts(self, mode='zone'):
+        """
+        Specialized simulation for multi-parameter sensing (pH + Temp).
+        Optimizes energy by packing both readings into a single 24-bit payload.
+        """
+        ph_dict = self.dm.get_data_dict('ph')
+        temp_dict = self.dm.get_data_dict('temp')
+        energy_model = EnergyModel(param_type='combined')
+        df = self._load_data().sort_values(by='Time_Seconds')
 
-    df = load_data('position_data.csv')
-    df.dropna(inplace=True)
-    df.sort_values(by='Time_Seconds', inplace=True)
-    
-    target_count = 20 if mode == 'zone' else 94
-    conf_cache = {}
-    def get_conf(n):
-        if n not in conf_cache: conf_cache[n] = StatsUtils.obtain_confidence_binomial(alpha, beta, n)
-        return conf_cache[n]
-    
-    energy_model = EnergyModel(param_type=param)
-    bot_states, buffers, final_results, sample_id = {}, {}, [], 1
-    sampling_chance = 0.05 
-    
-    for row in df.itertuples():
-        nid, t, vessel = row.Nanobot_ID, row.Time_Seconds, row.Vessel_ID
-        if pd.isna(vessel): continue
+        bot_states, buffers, final_results = {}, {}, []
+        sample_id, sampling_chance, target_count = 1, 0.05, (20 if mode == 'zone' else 94)
+
+        for row in df.itertuples():
+            nid, t, vessel = row.Nanobot_ID, row.Time_Seconds, row.Vessel_ID
+            if nid not in bot_states:
+                bot_states[nid] = {'energy': energy_model.E_max, 'is_awake': True, 'has_sampled_this_cycle': False, 'last_time': t, 'previous_vessel': None}
             
-        if nid not in bot_states:
-            bot_states[nid] = {
-                'energy': energy_model.E_max, 'is_awake': True, 
-                'has_sampled_this_cycle': False, 'last_time': t,
-                'previous_vessel': None
-            }
-        state = bot_states[nid]
-        
-        delta_t = t - state['last_time']
-        state['last_time'] = t
-        if delta_t > 0:
-            state['energy'] = energy_model.harvest_energy(state['energy'], delta_t)
-            # FIXED BUG: Use idle drain while waiting
-            state['energy'] = max(0, state['energy'] - (energy_model.idle_drain_per_sec * delta_t))
-            
-        if state['energy'] <= energy_model.E_off: state['is_awake'] = False
-        elif state['energy'] >= energy_model.E_on: state['is_awake'] = True
-        
-        if vessel == 2 and state['previous_vessel'] != 2: 
-            state['has_sampled_this_cycle'] = False
-            
-        if state['is_awake'] and not state['has_sampled_this_cycle']:
-            if random.random() < sampling_chance:
-                val = ProcessorUtils.get_random_value(data_dict, vessel, beta)
+            state = self._update_bot_energy(bot_states[nid], t, energy_model)
+            if vessel == 2 and state['previous_vessel'] != 2: state['has_sampled_this_cycle'] = False
+
+            if state['is_awake'] and not state['has_sampled_this_cycle'] and random.random() < sampling_chance:
+                # Capture both metrics simultaneously
+                v_ph = ProcessorUtils.get_random_value(ph_dict, vessel, self.beta)
+                v_temp = ProcessorUtils.get_random_value(temp_dict, vessel, self.beta)
                 key = DataManager.assign_zone(vessel) if mode == 'zone' else vessel
-                if key not in buffers: buffers[key] = []
-                buffers[key].append(val)
                 
-                # Deduct task cost when sampled
-                state['energy'] = max(0, state['energy'] - energy_model.action_consumption(param))
-                state['has_sampled_this_cycle'] = True
-                if state['energy'] <= energy_model.E_off: state['is_awake'] = False
+                buf = buffers.setdefault(key, {'ph': [], 'temp': []})
+                buf['ph'].append(v_ph); buf['temp'].append(v_temp)
                 
-                if len(buffers) == target_count:
-                    if all(get_conf(len(vals)) >= target_confidence for vals in buffers.values()):
-                        for k, vals in buffers.items():
-                            n = len(vals)
-                            final_results.append({
-                                'Sample_ID': sample_id, 'Time_Seconds_End': t,
-                                ('Zone' if mode == 'zone' else 'Selected_Vessel'): k, 
-                                'Median_Val': round(pd.Series(vals).median(), precision),
-                                'Count': n,
-                                'Binomial_%': get_conf(n),
-                                'Hoeffding_%': StatsUtils.obtain_confidence_hoeffding(alpha, beta, n)
-                            })
-                        buffers, sample_id = {}, sample_id + 1
-                        
-        state['previous_vessel'] = vessel
-                
-    return pd.DataFrame(final_results)
-
-def run_simulation_ts_combined_energy(alpha, beta, target_confidence=70.0, mode='zone'):
-    """
-    Time-series simulation measuring pH and Temperature simultaneously 
-    using a unified 24-bit payload energy profile.
-    """
-    dm = DataManager()
-    ph_dict = dm.get_data_dict('ph')
-    temp_dict = dm.get_data_dict('temp')
-    
-    if not ph_dict or not temp_dict: return None
-
-    df = load_data('position_data.csv')
-    df.dropna(inplace=True)
-    df.sort_values(by='Time_Seconds', inplace=True)
-    
-    target_count = 20 if mode == 'zone' else 94
-    conf_cache = {}
-    
-    def get_conf(n):
-        if n not in conf_cache: conf_cache[n] = StatsUtils.obtain_confidence_binomial(alpha, beta, n)
-        return conf_cache[n]
-    
-    energy_model = EnergyModel(param_type='combined')
-    bot_states, buffers, final_results, sample_id = {}, {}, [], 1
-    sampling_chance = 0.05 
-    
-    for row in df.itertuples():
-        nid, t, vessel = row.Nanobot_ID, row.Time_Seconds, row.Vessel_ID
-        if pd.isna(vessel): continue
-            
-        if nid not in bot_states:
-            bot_states[nid] = {
-                'energy': energy_model.E_max, 'is_awake': True, 
-                'has_sampled_this_cycle': False, 'last_time': t,
-                'previous_vessel': None
-            }
-        state = bot_states[nid]
-        
-        delta_t = t - state['last_time']
-        state['last_time'] = t
-        if delta_t > 0:
-            state['energy'] = energy_model.harvest_energy(state['energy'], delta_t)
-            state['energy'] = max(0, state['energy'] - (energy_model.idle_drain_per_sec * delta_t))
-            
-        if state['energy'] <= energy_model.E_off: state['is_awake'] = False
-        elif state['energy'] >= energy_model.E_on: state['is_awake'] = True
-        
-        if vessel == 2 and state['previous_vessel'] != 2: 
-            state['has_sampled_this_cycle'] = False
-            
-        if state['is_awake'] and not state['has_sampled_this_cycle']:
-            if random.random() < sampling_chance:
-                # Capture BOTH values 
-                val_ph = ProcessorUtils.get_random_value(ph_dict, vessel, beta)
-                val_temp = ProcessorUtils.get_random_value(temp_dict, vessel, beta)
-                
-                key = DataManager.assign_zone(vessel) if mode == 'zone' else vessel
-                if key not in buffers: buffers[key] = {'ph': [], 'temp': []}
-                
-                buffers[key]['ph'].append(val_ph)
-                buffers[key]['temp'].append(val_temp)
-                
-                # Deduct the combined task cost
                 state['energy'] = max(0, state['energy'] - energy_model.action_consumption('combined'))
                 state['has_sampled_this_cycle'] = True
-                if state['energy'] <= energy_model.E_off: state['is_awake'] = False
-                
+
                 if len(buffers) == target_count:
-                    # Check confidence using 'n' (Count is identical for both sets)
-                    if all(get_conf(len(vals['ph'])) >= target_confidence for vals in buffers.values()):
-                        for k, vals in buffers.items():
-                            n = len(vals['ph'])
+                    if all(self._get_conf(len(v['ph'])) >= self.target_confidence for v in buffers.values()):
+                        for k, v in buffers.items():
                             final_results.append({
                                 'Sample_ID': sample_id, 'Time_Seconds_End': t,
-                                ('Zone' if mode == 'zone' else 'Selected_Vessel'): k, 
-                                'Median_pH': round(pd.Series(vals['ph']).median(), 2),
-                                'Median_Temp': round(pd.Series(vals['temp']).median(), 3),
-                                'Count': n,
-                                'Binomial_%': get_conf(n),
-                                'Hoeffding_%': StatsUtils.obtain_confidence_hoeffding(alpha, beta, n)
+                                'Zone' if mode == 'zone' else 'Selected_Vessel': k,
+                                'Median_pH': round(pd.Series(v['ph']).median(), 2),
+                                'Median_Temp': round(pd.Series(v['temp']).median(), 3),
+                                'Count': len(v['ph']),
+                                'Binomial_%': self._get_conf(len(v['ph']))
                             })
                         buffers, sample_id = {}, sample_id + 1
-                        
-        state['previous_vessel'] = vessel
-                
-    return pd.DataFrame(final_results)
+            state['previous_vessel'] = vessel
+        return pd.DataFrame(final_results)
 
+    # --- Stats & Formatting Helpers ---
+
+    def _get_conf(self, n):
+        """Helper to get binomial confidence."""
+        return StatsUtils.obtain_confidence_binomial(self.alpha, self.beta, n)
+
+    def _finalize_results(self, df, group_col, precision):
+        """Groups data and attaches statistical confidence bounds."""
+        if df.empty: return None
+        count_col = 'Count'
+        res = df.groupby(group_col).agg({'Value': 'median', group_col: 'count'})
+        res.columns = ['Median_Val', 'Count']
+        res = res.reset_index()
+        res['Median_Val'] = res['Median_Val'].round(precision)
+        res['Binomial_%'] = res['Count'].apply(self._get_conf)
+        res['Hoeffding_%'] = res['Count'].apply(lambda n: StatsUtils.obtain_confidence_hoeffding(self.alpha, self.beta, n))
+        return res.sort_values(by='Count', ascending=False)
+
+    def _format_ts_row(self, sid, t, key, vals, precision, mode):
+        """Formats a single row for time-series dataframes."""
+        n = len(vals)
+        return {
+            'Sample_ID': sid, 'Time_Seconds_End': t,
+            'Zone' if mode == 'zone' else 'Selected_Vessel': key,
+            'Median_Val': round(pd.Series(vals).median(), precision),
+            'Count': n, 'Binomial_%': self._get_conf(n)
+        }
 
 # ==========================================
 # MAIN EXECUTION ROUTER
@@ -344,28 +225,23 @@ if __name__ == "__main__":
     parser.add_argument("--energy", action="store_true", help="Enable energy constraints")
     
     args = parser.parse_args()
+    sim = NanobotSimulator(args.alpha, args.beta)
     report = None
 
+    is_ts = args.mode.startswith('ts_')
+    routing_mode = 'zone' if 'zone' in args.mode else 'long'
+
     if args.param == "combined":
-        if args.energy:
-            if args.mode in ["ts_zone", "ts_long"]:
-                routing_mode = 'zone' if args.mode == 'ts_zone' else 'long'
-                report = run_simulation_ts_combined_energy(args.alpha, args.beta, target_confidence=70.0, mode=routing_mode)
-            else:
-                print("Note: 'combined' is optimized for TS mode. Outputting empty for static modes.")
+        if args.energy and is_ts:
+            report = sim.run_combined_energy_ts(mode=routing_mode)
         else:
-            print("Error: The 'combined' parameter requires the energy model (--energy) to dynamically calculate shared packet costs.")
+            print("Error: 'combined' mode requires --energy and a TS mode (ts_zone/ts_long).")
     else:
         if args.energy:
-            if args.mode == "zone": report = run_simulation_energy(args.alpha, args.beta, args.param, 'zone')
-            elif args.mode == "long": report = run_simulation_energy(args.alpha, args.beta, args.param, 'long')
-            elif args.mode == "ts_zone": report = run_simulation_ts_energy(args.alpha, args.beta, args.param, target_confidence=70.0, mode='zone')
-            elif args.mode == "ts_long": report = run_simulation_ts_energy(args.alpha, args.beta, args.param, target_confidence=70.0, mode='long')
+            report = sim.run_energy_simulation(args.param, mode=routing_mode, is_timeseries=is_ts)
         else:
-            if args.mode == "zone": report = run_simulation_random(args.alpha, args.beta, args.param, 'zone')
-            elif args.mode == "long": report = run_simulation_random(args.alpha, args.beta, args.param, 'long')
-            elif args.mode == "ts_zone": report = run_simulation_ts_random(args.alpha, args.beta, args.param, target_confidence=70.0, mode='zone')
-            elif args.mode == "ts_long": report = run_simulation_ts_random(args.alpha, args.beta, args.param, target_confidence=70.0, mode='long')
-        
+            # Random sampling doesn't currently have a specific TS logic in original script but follows the static path.
+            report = sim.run_random_static(args.param, mode=routing_mode)
+
     if report is not None:
         print(report.to_string(index=False))

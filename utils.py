@@ -4,10 +4,18 @@ import random
 import math
 from scipy.stats import binom
 
+# ==========================================
+# DATA MANAGEMENT
+# ==========================================
+
 class DataManager:
-    """Storage for anatomical mappings and physiological ranges."""
+    """
+    Centralized storage for anatomical mappings and physiological ground-truth ranges.
+    Maps localized 'Zones' to specific 'Vessel_IDs' and provides reference values 
+    for physical parameters across the body.
+    """
     
-    # Accurate zone mapping
+    # Anatomical zone mapping (Zone ID -> List of Vessel IDs)
     ZONE_TO_VESSELS = {
         1: [2], 2: [61, 94], 3: [57, 58], 4: [1, 3, 4, 8, 13, 18, 24],
         5: [19, 26, 31, 34], 6: [6, 7], 7: [9], 8: [81, 83],
@@ -20,9 +28,10 @@ class DataManager:
     }
 
     def __init__(self):
-        # Full physiological data
+        # Physiological baseline ranges [Min, Max] per Vessel ID
         self.datasets = {
             'press': {
+                # Pressure in mmHg
                 1: [80.0, 120.0], 2: [6.0, 12.0], 3: [80.0, 120.0], 4: [80.0, 120.0], 5: [80.0, 120.0], 
                 6: [70.0, 110.0], 7: [70.0, 110.0], 8: [80.0, 120.0], 9: [20.0, 35.0], 10: [80.0, 120.0], 
                 11: [80.0, 120.0], 12: [80.0, 120.0], 13: [80.0, 120.0], 14: [80.0, 120.0], 15: [80.0, 120.0], 
@@ -43,6 +52,7 @@ class DataManager:
                 92: [2.0, 6.0], 93: [2.0, 6.0], 94: [6.0, 12.0]
             },
             'ph': {
+                # pH Levels (Slightly alkaline to neutral)
                 1: [7.35, 7.45], 2: [7.35, 7.45], 3: [7.35, 7.45], 4: [7.35, 7.45], 5: [7.35, 7.45], 
                 6: [7.35, 7.45], 7: [7.35, 7.45], 8: [7.35, 7.45], 9: [7.35, 7.4], 10: [7.35, 7.45], 
                 11: [7.35, 7.45], 12: [7.35, 7.45], 13: [7.35, 7.45], 14: [7.35, 7.45], 15: [7.35, 7.45], 
@@ -64,6 +74,7 @@ class DataManager:
                 91: [7.35, 7.38], 92: [7.35, 7.38], 93: [7.35, 7.38], 94: [7.35, 7.45]
             },
             'so2': {
+                # Oxygen Saturation in %
                 1: [97.0, 99.0], 2: [97.0, 99.0], 3: [97.0, 99.0], 4: [97.0, 99.0], 5: [97.0, 99.0], 
                 6: [97.0, 99.0], 7: [97.0, 99.0], 8: [97.0, 99.0], 9: [80.0, 85.0], 10: [97.0, 99.0], 
                 11: [97.0, 99.0], 12: [97.0, 99.0], 13: [97.0, 99.0], 14: [97.0, 99.0], 15: [97.0, 99.0], 
@@ -85,6 +96,7 @@ class DataManager:
                 91: [70.0, 75.0], 92: [70.0, 75.0], 93: [70.0, 75.0], 94: [97.0, 99.0]
             },
             'temp': {
+                # Temperature in Celsius
                 1: [36.8, 37.2], 2: [36.8, 37.2], 3: [36.8, 37.2], 4: [36.8, 37.2], 5: [36.8, 37.2], 
                 6: [36.8, 37.2], 7: [36.8, 37.2], 8: [36.8, 37.2], 9: [36.8, 37.2], 10: [36.8, 37.2], 
                 11: [36.8, 37.2], 12: [36.8, 37.2], 13: [36.8, 37.2], 14: [36.8, 37.2], 15: [36.8, 37.2], 
@@ -107,139 +119,205 @@ class DataManager:
             }
         }
 
-    def get_data_dict(self, param_key):
-        """Returns the specific parameter dictionary."""
+    def get_data_dict(self, param_key: str) -> dict:
+        """Retrieves the expected bounds dictionary for a given parameter."""
         return self.datasets.get(param_key.lower())
 
-    def get_decimal_precision(self, param_type):
-        """Maps the parameter to its decimal rounding precision."""
-        if param_type == 'so2': return 0  
-        elif param_type == 'ph': return 2  
-        elif param_type == 'temp': return 3  
-        elif param_type == 'press': return 4  
-        return 3
+    def get_decimal_precision(self, param_type: str) -> int:
+        """Returns the appropriate number of decimal places for data rounding."""
+        precisions = {'so2': 0, 'ph': 2, 'temp': 3, 'press': 4}
+        return precisions.get(param_type, 3)
 
     @staticmethod
-    def assign_zone(vessel_id):
+    def assign_zone(vessel_id: int):
+        """Finds the anatomical zone containing a specific vessel."""
         for zone, vessels in DataManager.ZONE_TO_VESSELS.items():
             if vessel_id in vessels:
                 return zone
         return None
 
+# ==========================================
+# PROCESSING UTILS
+# ==========================================
+
 class ProcessorUtils:
+    """Helper methods for handling data structures and generating randomized data."""
+
     @staticmethod
-    def split_vessel_ids(row):
+    def split_vessel_ids(row: pd.Series) -> pd.DataFrame:
+        """
+        Splits lists of sequential vessel IDs when a nanobot passes through the heart (Vessel ID = 2).
+        This models separate circulatory 'laps' or cycles.
+        """
         vessel_ids = row['Vessel_ID']
         segments = []
         current_segment = []
+        
         for i, v_id in enumerate(vessel_ids):
             if v_id == 2:
+                # If we encounter the heart, end the current segment (unless it's the very start)
                 if i == 0 or vessel_ids[i-1] != 2:
-                    if current_segment: segments.append(current_segment)
+                    if current_segment: 
+                        segments.append(current_segment)
                     current_segment = [2]
                 else:
                     current_segment.append(2)
             else:
                 current_segment.append(v_id)
-        if current_segment: segments.append(current_segment)
+                
+        if current_segment: 
+            segments.append(current_segment)
+            
         return pd.DataFrame({
             'Nanobot_ID': [row['Nanobot_ID']] * len(segments),
             'Vessel_ID': segments
         })
 
     @staticmethod
-    def get_random_value(data_dict, vessel_id, beta):
+    def get_random_value(data_dict: dict, vessel_id: int, beta: float) -> float:
+        """
+        Generates a random physical reading within the expected bounds of the vessel.
+        Uses `beta` to simulate a probability of sensing error (reading data from a random, incorrect vessel).
+        """
         if vessel_id not in data_dict:
             chosen_id = random.choice(list(data_dict.keys()))
         elif random.random() < beta:
+            # Introduce error: sample from a different vessel
             available_ids = list(data_dict.keys())
             available_ids.remove(vessel_id)
             chosen_id = random.choice(available_ids)
         else:
             chosen_id = vessel_id
+            
         min_val, max_val = data_dict[chosen_id]
         return random.uniform(min_val, max_val)
 
+# ==========================================
+# STATISTICAL UTILS
+# ==========================================
+
 class StatsUtils:
+    """Methods for calculating data confidence using statistical bounding theorems."""
+
     @staticmethod
-    def obtain_confidence_binomial(alpha, beta, n):
+    def obtain_confidence_binomial(alpha: float, beta: float, n: int) -> float:
+        """
+        Calculates the probability of success using a Binomial Cumulative Distribution Function.
+        Adjusts the effective sample size to be even.
+        
+        The validity probability is derived as:
+        $$p_{valid} = 1 - (\alpha + \beta - \alpha\beta)$$
+        """
         if n <= 0: return 0.0
         n_adj = n if n % 2 != 0 else n - 1
-        epsilon = alpha + beta - (alpha * beta)
-        p_valid = 1 - epsilon
+        
+        p_valid = 1 - (alpha + beta - (alpha * beta))
         failure_threshold = math.floor(n_adj / 2)
+        
         prob_failure = binom.cdf(failure_threshold, n_adj, p_valid)
         return (1 - prob_failure) * 100
 
     @staticmethod
-    def obtain_confidence_hoeffding(alpha, beta, n):
+    def obtain_confidence_hoeffding(alpha: float, beta: float, n: int) -> float:
+        """
+        Calculates a statistical confidence bound using Hoeffding's Inequality.
+        """
         if n <= 0: return 0.0
         n_adj = n if n % 2 != 0 else n - 1
-        epsilon = alpha + beta - (alpha * beta)
-        p_valid = 1 - epsilon
+        
+        p_valid = 1 - (alpha + beta - (alpha * beta))
         if p_valid <= 0.5: return 0.0
+        
         t = p_valid - 0.5
         prob_failure_bound = math.exp(-2 * n_adj * (t ** 2))
         return max(0.0, 1 - prob_failure_bound) * 100
-    
-class EnergyModel:
-    def __init__(self, param_type='press', e_max=800e-12, e_off=40e-12):
-        self.C_cap = 9e-9           
-        self.V_g = 0.42             
-        self.delta_Q = 6e-12        
-        self.vibration_freq = 50    
-        
-        self.E_tx_pulse = 1e-12     
-        self.E_rx_pulse = 0.1e-12   
-        self.idle_drain_per_sec = 1e-12  
-        self.header_bits = 32       
 
-        self.E_max = e_max          
-        self.E_off = e_off          
+# ==========================================
+# ENERGY MODELING
+# ==========================================
+
+class EnergyModel:
+    """
+    Simulates a piezoelectric/vibrational energy harvesting system for nanobots.
+    Calculates charging over time and energy expenditure per packet transmission.
+    """
+    def __init__(self, param_type='press', e_max=800e-12, e_off=40e-12):
+        # Hardware specs
+        self.C_cap = 9e-9             # Capacitor rating (Farads)
+        self.V_g = 0.42               # Generation voltage (Volts)
+        self.delta_Q = 6e-12          # Charge increment per cycle (Coulombs)
+        self.vibration_freq = 50      # Harvesting vibrations per second (Hz)
+        
+        # Energy expenditures (Joules)
+        self.E_tx_pulse = 1e-12       # Transmission energy per bit 
+        self.E_rx_pulse = 0.1e-12     # Reception energy per bit
+        self.idle_drain_per_sec = 1e-12 
+        self.header_bits = 32         
+        
+        # Thresholds
+        self.E_max = e_max            # Max battery capacity
+        self.E_off = e_off            # Brown-out / turn-off threshold
         
         task_cost = self.action_consumption(param_type)
         self.E_on = self.E_off + task_cost + 0.1e-12
 
-    def get_current_cycles(self, energy):
+    def get_current_cycles(self, energy: float) -> float:
+        """
+        Reverse-calculates how many charge cycles are required to reach the current energy state.
+        Derived from solving the energy equation for 'n' cycles.
+        """
         if energy >= self.E_max: return float('inf')
         if energy <= 0: return 0
         try:
             inner = 1 - math.sqrt((2 * energy) / (self.C_cap * (self.V_g**2)))
             if inner <= 0: return float('inf')
+            
             cycles = math.ceil((-self.V_g * self.C_cap / self.delta_Q) * math.log(inner))
             return max(0, cycles)
         except ValueError:
             return 0
 
-    def harvest_energy(self, current_energy, delta_t):
+    def harvest_energy(self, current_energy: float, delta_t: float) -> float:
+        """
+        Calculates the harvested energy added to the capacitor over a time delta.
+        """
         if current_energy >= self.E_max: return self.E_max
+        
         cycles_passed = int(delta_t * self.vibration_freq)
         if cycles_passed == 0: return current_energy
+        
         current_cycles = self.get_current_cycles(current_energy)
         if current_cycles == float('inf'): return self.E_max
+        
         new_cycles = current_cycles + cycles_passed
-        new_energy = 0.5 * self.C_cap * (self.V_g * (1 - math.exp(- (new_cycles * self.delta_Q) / (self.V_g * self.C_cap))))**2
+        
+        # Calculate new stored energy
+        voltage_factor = 1 - math.exp(- (new_cycles * self.delta_Q) / (self.V_g * self.C_cap))
+        new_energy = 0.5 * self.C_cap * (self.V_g * voltage_factor)**2
+        
         return min(new_energy, self.E_max)
         
-    def get_payload_size(self, param_type):
-        if param_type == 'ph': return 8
-        elif param_type == 'so2': return 8
-        elif param_type == 'temp': return 16
-        elif param_type == 'press': return 32
-        elif param_type == 'combined': return 24 # 8 bits (pH) + 16 bits (Temp)
-        else: return 32
+    def get_payload_size(self, param_type: str) -> int:
+        """Returns the data payload bit-size for the sensor type."""
+        sizes = {'ph': 8, 'so2': 8, 'temp': 16, 'press': 32, 'combined': 24}
+        return sizes.get(param_type, 32)
 
-    def get_sensing_cost(self, param_type): 
-        if param_type == 'ph': return 1.5e-15
-        elif param_type == 'temp': return 97.64e-15
-        elif param_type == 'press': return 836e-15
-        elif param_type == 'so2': return 48e-9
-        elif param_type == 'combined': return 1.5e-15 + 97.64e-15 # 99.14 fJ
-        else: return 0.5e-15
+    def get_sensing_cost(self, param_type: str) -> float: 
+        """Returns the hardware energy cost (in Joules) to physically take a measurement."""
+        costs = {
+            'ph': 1.5e-15,
+            'temp': 97.64e-15,
+            'press': 836e-15,
+            'so2': 48e-9,
+            'combined': 1.5e-15 + 97.64e-15  # 99.14 fJ
+        }
+        return costs.get(param_type, 0.5e-15)
 
-    def action_consumption(self, param_type):
+    def action_consumption(self, param_type: str) -> float:
+        """Calculates total energy consumed by sensing AND transmitting the data packet."""
         sensing_cost = self.get_sensing_cost(param_type)
         N_data = self.get_payload_size(param_type)
         N_bits = self.header_bits + N_data
+        
         tx_cost = N_bits * 0.5 * self.E_tx_pulse 
         return sensing_cost + tx_cost
