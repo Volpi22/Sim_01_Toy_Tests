@@ -3,3 +3,5 @@
 \venv
 log_output.txt
 position_data.csv
+\datasets
+\raw_ns3_traces
