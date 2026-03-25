@@ -150,18 +150,19 @@ class AnomalyDetector:
     Processes all zones independently, maintaining separate baselines and Kalman 
     filters for each anatomical region. Returns a dictionary of triggering zones.
     """
-    # REMOVED target_zone from initialization
     def __init__(self, alpha=0.05, beta=0.1, target_confidence=70.0, 
-                 raw_drift_threshold=2.5, agg_persistence=3, 
-                 agg_abs_drift=0.05, agg_abs_drift_ph=0.10, agg_abs_drift_temp=0.5):
+                 raw_drift_threshold=2.5, raw_drift_ph=1.5, raw_drift_temp=3.5, 
+                 agg_persistence=3, agg_abs_drift=0.05, agg_abs_drift_ph=0.10, agg_abs_drift_temp=0.5):
         
         self.alpha = alpha
         self.beta = beta
         self.target_confidence = target_confidence
         
         self.raw_drift_threshold = raw_drift_threshold
-        self.agg_persistence = agg_persistence
+        self.raw_drift_ph = raw_drift_ph
+        self.raw_drift_temp = raw_drift_temp
         
+        self.agg_persistence = agg_persistence
         self.agg_abs_drift = agg_abs_drift
         self.agg_abs_drift_ph = agg_abs_drift_ph
         self.agg_abs_drift_temp = agg_abs_drift_temp
@@ -251,7 +252,7 @@ class AnomalyDetector:
         df_out = raw_df.copy().sort_values('Time_Seconds')
         df_out['Filtered_pH'] = np.nan
         df_out['Filtered_Temp'] = np.nan
-        detection_times = {} # Will store {zone_id: {'ph': time, 'temp': time}}
+        detection_times = {} 
 
         for zone, group in df_out.groupby('Zone'):
             buf_ph, buf_temp = [], []
@@ -268,8 +269,9 @@ class AnomalyDetector:
                     
                     current_conf = StatsUtils.obtain_confidence_binomial(self.alpha, self.beta, len(buf_ph))
                     if current_conf >= self.target_confidence:
-                        kf_ph = RawStreamKalman(alpha=self.alpha, beta=self.beta, initial_val=np.median(buf_ph), drift_threshold=self.raw_drift_threshold)
-                        kf_temp = RawStreamKalman(alpha=self.alpha, beta=self.beta, initial_val=np.median(buf_temp), drift_threshold=self.raw_drift_threshold)
+                        # USE THE SPLIT THRESHOLDS HERE
+                        kf_ph = RawStreamKalman(alpha=self.alpha, beta=self.beta, initial_val=np.median(buf_ph), drift_threshold=self.raw_drift_ph)
+                        kf_temp = RawStreamKalman(alpha=self.alpha, beta=self.beta, initial_val=np.median(buf_temp), drift_threshold=self.raw_drift_temp)
                         baseline_established = True
                         
                         for c_idx in calib_indices:
@@ -285,7 +287,6 @@ class AnomalyDetector:
                     if is_drift_ph and det_time['ph'] is None: det_time['ph'] = row['Time_Seconds']
                     if is_drift_temp and det_time['temp'] is None: det_time['temp'] = row['Time_Seconds']
 
-            # If either parameter triggered an alert, record the zone
             if det_time['ph'] is not None or det_time['temp'] is not None:
                 detection_times[zone] = det_time
 

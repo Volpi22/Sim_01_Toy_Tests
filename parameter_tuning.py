@@ -3,8 +3,8 @@ import numpy as np
 import optuna
 import warnings
 
-# Suppress pandas chained assignment warnings for cleaner output during tuning
 warnings.filterwarnings('ignore')
+optuna.logging.set_verbosity(optuna.logging.WARNING) 
 
 from drift_detection import AnomalyDetector
 
@@ -14,16 +14,12 @@ class ClinicalCostEvaluator:
     Cost = (w1 * FPR) + (w2 * FNR) + (w3 * NPL)
     """
     def __init__(self, w1=0.4, w2=0.4, w3=0.2, total_zones=10):
-        self.w1 = w1  # Weight for False Positive Rate (Alarm Fatigue)
-        self.w2 = w2  # Weight for False Negative Rate (Missed Detections)
-        self.w3 = w3  # Weight for Normalized Progression Latency (Speed)
+        self.w1 = w1  
+        self.w2 = w2  
+        self.w3 = w3  
         self.total_zones = total_zones
 
     def calculate_cost(self, results_list):
-        """
-        Calculates the aggregate clinical cost across all simulations.
-        results_list: List of dicts containing ground truth and detection times.
-        """
         total_fp = 0
         total_fn = 0
         total_tp = 0
@@ -34,64 +30,64 @@ class ClinicalCostEvaluator:
             target_zone = res['Target_Zone']
             t_start = res['True_t_start']
             t_peak = res['True_t_peak']
-            det_times = res['Detection_Times']  # Format: {zone_id: time_seconds}
+            det_times = res['Detection_Times']  
 
             if target_zone == -1:  # Healthy Patient
                 fp_in_sim = len(det_times)
                 total_fp += fp_in_sim
                 total_tn += (self.total_zones - fp_in_sim)
             else:  # Diseased Patient
-                # Check target zone detection
                 if target_zone in det_times:
-                    t_det = det_times[target_zone]
+                    # EXTRACT THE DETECTION TIME SAFELY
+                    raw_det_val = det_times[target_zone]
+                    
+                    if isinstance(raw_det_val, dict):
+                        valid_times = [t for t in raw_det_val.values() if t is not None]
+                        if not valid_times:
+                            total_fn += 1
+                            continue
+                        t_det = min(valid_times) 
+                    else:
+                        t_det = raw_det_val
+
+                    # EVALUATE THE DETECTION
                     if t_det >= t_start:
-                        # True Positive: Caught during or after onset
                         total_tp += 1
-                        # Calculate NPL: Cap at 1.0 (100% severity) if detected after peak
                         progression_window = t_peak - t_start
                         npl = min(1.0, (t_det - t_start) / progression_window)
                         npl_sum += npl
                     else:
-                        # Premature detection: Flagged before disease started -> False Positive
                         total_fp += 1
-                        total_fn += 1 # Missed the actual disease window
+                        total_fn += 1 
                 else:
-                    # Missed completely -> False Negative
                     total_fn += 1
 
-                # Count spatial false positives (flagged the wrong zone)
                 other_zones_flagged = len([z for z in det_times.keys() if z != target_zone])
                 total_fp += other_zones_flagged
                 total_tn += ((self.total_zones - 1) - other_zones_flagged)
 
-        # Calculate Rates
-        # FPR: Total False Positives / Total Negative Opportunities
         fpr = total_fp / (total_fp + total_tn) if (total_fp + total_tn) > 0 else 0.0
         
-        # FNR: Total False Negatives / Total Positive Opportunities (Total diseased patients)
         total_diseased = total_tp + total_fn
         fnr = total_fn / total_diseased if total_diseased > 0 else 0.0
         
-        # Mean NPL
-        mean_npl = npl_sum / total_tp if total_tp > 0 else 1.0 # Max penalty if no TPs
+        mean_npl = npl_sum / total_tp if total_tp > 0 else 1.0 
 
-        # Final Composite Cost
         cost = (self.w1 * fpr) + (self.w2 * fnr) + (self.w3 * mean_npl)
         return cost
 
 
 class FilterOptimizer:
     """Optuna objective classes for both Raw and Aggregated tuning."""
-    def __init__(self, data_path, stream_type='raw'):
-        print(f"Loading {stream_type.upper()} dataset into memory...")
+    def __init__(self, data_path, stream_type='raw', param_type='ph'):
+        print(f"Loading {param_type.upper()} {stream_type.upper()} dataset into memory...")
         self.df = pd.read_parquet(data_path)
         self.stream_type = stream_type
+        self.param_type = param_type
         self.evaluator = ClinicalCostEvaluator()
 
-        # Pre-group data by simulation ID to save time during the Optuna loop
         self.simulations = []
         for sim_id, group in self.df.groupby('Simulation_ID'):
-            # Extract ground truth from the first row of the simulation
             first_row = group.iloc[0]
             self.simulations.append({
                 'df': group.copy(),
@@ -102,20 +98,25 @@ class FilterOptimizer:
         print(f"Loaded {len(self.simulations)} unique patient scenarios.")
 
     def objective_raw(self, trial):
-        """1D Optimization for the Raw Stream Kalman Filter."""
-        # 1. Define Search Space
-        drift_thresh = trial.suggest_float("raw_drift_threshold", 0.01, 5.0, step=0.1)
+        """1D/2D Optimization for the Raw Stream Kalman Filter."""
+        if self.param_type == 'ph':
+            thresh = trial.suggest_float("raw_drift_threshold", 0.01, 2.0, step=0.05)
+            detector = AnomalyDetector(alpha=0.3, beta=0.10, raw_drift_threshold=thresh)
+        elif self.param_type == 'temp':
+            thresh = trial.suggest_float("raw_drift_threshold", 1.0, 5.0, step=0.1)
+            detector = AnomalyDetector(alpha=0.3, beta=0.10, raw_drift_threshold=thresh)
+        elif self.param_type == 'combined':
+            thresh_ph = trial.suggest_float("raw_drift_ph", 0.01, 2.0, step=0.05)
+            thresh_temp = trial.suggest_float("raw_drift_temp", 1.0, 5.0, step=0.1)
+            detector = AnomalyDetector(alpha=0.3, beta=0.10, raw_drift_ph=thresh_ph, raw_drift_temp=thresh_temp)
 
-        # 2. Instantiate Detector with trial parameters
-        detector = AnomalyDetector(
-            alpha=0.3, beta=0.10, target_confidence=70.0,
-            raw_drift_threshold=drift_thresh
-        )
-
-        # 3. Run all simulations
         results = []
         for sim in self.simulations:
-            _, det_times = detector.detect_raw_stream(sim['df'])
+            if self.param_type == 'combined':
+                _, det_times = detector.detect_combined_raw_stream(sim['df'])
+            else:
+                _, det_times = detector.detect_raw_stream(sim['df'])
+                
             results.append({
                 'Target_Zone': sim['Target_Zone'],
                 'True_t_start': sim['True_t_start'],
@@ -123,26 +124,30 @@ class FilterOptimizer:
                 'Detection_Times': det_times
             })
 
-        # 4. Calculate and return Cost
         return self.evaluator.calculate_cost(results)
 
     def objective_agg(self, trial):
-        """2D Optimization for the Aggregated Stream Kalman Filter."""
-        # 1. Define Search Space
+        """2D/3D Optimization for the Aggregated Stream Kalman Filter."""
         persistence = trial.suggest_int("agg_persistence", 1, 6)
-        abs_drift = trial.suggest_float("agg_abs_drift", 0.01, 0.20, step=0.01)
 
-        # 2. Instantiate Detector
-        detector = AnomalyDetector(
-            alpha=0.3, beta=0.10, target_confidence=70.0,
-            agg_persistence=persistence,
-            agg_abs_drift=abs_drift
-        )
+        if self.param_type == 'ph':
+            abs_drift = trial.suggest_float("agg_abs_drift", 0.01, 0.20, step=0.01)
+            detector = AnomalyDetector(alpha=0.3, beta=0.10, agg_persistence=persistence, agg_abs_drift=abs_drift)
+        elif self.param_type == 'temp':
+            abs_drift = trial.suggest_float("agg_abs_drift", 0.1, 1.5, step=0.1)
+            detector = AnomalyDetector(alpha=0.3, beta=0.10, agg_persistence=persistence, agg_abs_drift=abs_drift)
+        elif self.param_type == 'combined':
+            drift_ph = trial.suggest_float("agg_abs_drift_ph", 0.01, 0.20, step=0.01)
+            drift_temp = trial.suggest_float("agg_abs_drift_temp", 0.1, 1.5, step=0.1)
+            detector = AnomalyDetector(alpha=0.3, beta=0.10, agg_persistence=persistence, agg_abs_drift_ph=drift_ph, agg_abs_drift_temp=drift_temp)
 
-        # 3. Run all simulations
         results = []
         for sim in self.simulations:
-            _, det_times = detector.detect_aggregated_stream(sim['df'])
+            if self.param_type == 'combined':
+                _, det_times = detector.detect_combined_aggregated_stream(sim['df'])
+            else:
+                _, det_times = detector.detect_aggregated_stream(sim['df'])
+                
             results.append({
                 'Target_Zone': sim['Target_Zone'],
                 'True_t_start': sim['True_t_start'],
@@ -150,5 +155,53 @@ class FilterOptimizer:
                 'Detection_Times': det_times
             })
 
-        # 4. Calculate and return Cost
         return self.evaluator.calculate_cost(results)
+
+
+def run_all_optimizations(datasets_to_tune=['ph', 'temp', 'combined']):
+    """
+    Executes the entire hyperparameter tuning pipeline for the specified datasets.
+    Returns a dictionary of all completed Optuna studies.
+    """
+    completed_studies = {}
+
+    for p_type in datasets_to_tune:
+        print(f"\n{'='*60}")
+        print(f" STARTING OPTIMIZATION FOR: {p_type.upper()}")
+        print(f"{'='*60}\n")
+        
+        completed_studies[p_type] = {}
+        
+        # --- 1. RAW STREAM TUNING ---
+        raw_opt = FilterOptimizer(f'datasets/tuning_dataset_{p_type}_raw.parquet', stream_type='raw', param_type=p_type)
+        study_raw = optuna.create_study(direction="minimize", study_name=f"Raw_{p_type}")
+        
+        # Combined needs more trials due to wider search space (2 parameters instead of 1)
+        n_trials_raw = 40 if p_type == 'combined' else 20
+        
+        print(f"-> Running {n_trials_raw} trials for {p_type.upper()} RAW...")
+        study_raw.optimize(raw_opt.objective_raw, n_trials=n_trials_raw, show_progress_bar=True) 
+        
+        completed_studies[p_type]['raw'] = study_raw
+        
+        print(f"\n[{p_type.upper()} RAW] Best Params: {study_raw.best_params}")
+        print(f"[{p_type.upper()} RAW] Lowest Cost:   {study_raw.best_value:.4f}\n")
+        print("-" * 40)
+
+        # --- 2. AGGREGATED STREAM TUNING ---
+        agg_opt = FilterOptimizer(f'datasets/tuning_dataset_{p_type}_agg.parquet', stream_type='agg', param_type=p_type)
+        study_agg = optuna.create_study(direction="minimize", study_name=f"Agg_{p_type}")
+        
+        # Combined needs 60 trials to explore 3 dimensions
+        n_trials_agg = 60 if p_type == 'combined' else 30
+        
+        print(f"-> Running {n_trials_agg} trials for {p_type.upper()} AGGREGATED...")
+        study_agg.optimize(agg_opt.objective_agg, n_trials=n_trials_agg, show_progress_bar=True)
+        
+        completed_studies[p_type]['agg'] = study_agg
+
+        print(f"\n[{p_type.upper()} AGG] Best Params: {study_agg.best_params}")
+        print(f"[{p_type.upper()} AGG] Lowest Cost:   {study_agg.best_value:.4f}\n")
+        
+    print("\n All optimizations complete!")
+    return completed_studies

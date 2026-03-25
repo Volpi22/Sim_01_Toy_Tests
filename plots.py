@@ -2,6 +2,86 @@ import matplotlib.pyplot as plt
 import math
 import numpy as np
 import pandas as pd
+from optuna.visualization import plot_optimization_history, plot_param_importances, plot_contour
+
+# ==========================================
+# OPTUNA TUNING VISUALIZER
+# ==========================================
+
+class OptunaVisualizer:
+    """
+    Handles the generation of interactive Plotly graphs for Optuna hyperparameter tuning.
+    These plots analyze the search space, cost history, and parameter importance.
+    """
+    def __init__(self):
+        pass
+
+    def plot_1d_raw_tuning(self, study, title_suffix="Raw Filter"):
+        """
+        Visualizes a 1D tuning study (Single Parameter Raw Filter).
+        Since it's 1D, we only need the history to see how the cost dropped over time.
+        """
+        print(f"--- Visualization: {title_suffix} ---")
+        history_fig = plot_optimization_history(study)
+        history_fig.update_layout(title=f"Optimization History ({title_suffix})")
+        history_fig.show()
+
+    def plot_2d_agg_tuning(self, study, title_suffix="Aggregated Filter"):
+        """
+        Visualizes a 2D tuning study (Single Parameter Aggregated Filter).
+        Shows cost history, parameter importance, and a 2D contour map of the search space.
+        """
+        print(f"--- Visualization: {title_suffix} ---")
+        
+        history_fig = plot_optimization_history(study)
+        history_fig.update_layout(title=f"Optimization History ({title_suffix})")
+        history_fig.show()
+
+        importance_fig = plot_param_importances(study)
+        importance_fig.update_layout(title=f"Hyperparameter Importance ({title_suffix})")
+        importance_fig.show()
+
+        contour_fig = plot_contour(study, params=['agg_persistence', 'agg_abs_drift'])
+        contour_fig.update_layout(title=f"2D Search Space Contour ({title_suffix})")
+        contour_fig.show()
+
+    def plot_combined_raw_tuning(self, study, title_suffix="Combined Raw Filter"):
+        """
+        Visualizes a 2D tuning study (Combined Parameter Raw Filter).
+        Shows the interplay between the pH drift threshold and Temp drift threshold.
+        """
+        print(f"--- Visualization: {title_suffix} ---")
+        
+        history_fig = plot_optimization_history(study)
+        history_fig.update_layout(title=f"Optimization History ({title_suffix})")
+        history_fig.show()
+
+        importance_fig = plot_param_importances(study)
+        importance_fig.update_layout(title=f"Hyperparameter Importance ({title_suffix})")
+        importance_fig.show()
+
+        contour_fig = plot_contour(study, params=['raw_drift_ph', 'raw_drift_temp'])
+        contour_fig.update_layout(title=f"2D Search Space Contour ({title_suffix})")
+        contour_fig.show()
+
+    def plot_combined_agg_tuning(self, study, title_suffix="Combined Aggregated Filter"):
+        """
+        Visualizes a 3D tuning study (Combined Parameter Aggregated Filter).
+        Generates a 3x3 matrix contour plot comparing persistence vs pH vs Temp drift.
+        """
+        print(f"--- Visualization: {title_suffix} ---")
+        
+        history_fig = plot_optimization_history(study)
+        history_fig.update_layout(title=f"Optimization History ({title_suffix})")
+        history_fig.show()
+
+        importance_fig = plot_param_importances(study)
+        importance_fig.update_layout(title=f"Hyperparameter Importance ({title_suffix})")
+        importance_fig.show()
+
+        contour_fig = plot_contour(study, params=['agg_persistence', 'agg_abs_drift_ph', 'agg_abs_drift_temp'])
+        contour_fig.update_layout(title=f"3D Search Space Matrix ({title_suffix})", height=800, width=800)
+        contour_fig.show()
 
 # ==========================================
 # BASELINE SIMULATION VISUALIZER

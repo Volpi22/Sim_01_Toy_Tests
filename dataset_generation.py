@@ -10,12 +10,11 @@ from diseases import DiseaseSimulator
 TRACES_DIR = os.path.expanduser("~/EXPERIMENTS/Sim_01_Toy_Tests/raw_ns3_traces")
 
 N_CSVS_GENERATED = 5  
-# PH_DISEASES = ['systemic_alkalosis_ph', 'dka_ph']
 PH_DISEASES = ['systemic_alkalosis_ph', 'dka_ph', 'stroke_ph', 'nec_ph', 'rta_ph']
 RUNS_PER_DISEASE_PER_CSV = 4
 HEALTHY_RUNS_PER_CSV = len(PH_DISEASES) * RUNS_PER_DISEASE_PER_CSV
 
-NUM_CORES = multiprocessing.cpu_count()
+NUM_CORES = multiprocessing.cpu_count()-8
 # ==========================================
 
 def process_patient(task_params):
