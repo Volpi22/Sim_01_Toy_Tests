@@ -146,7 +146,7 @@ class AggregatedKalman:
 
 class AnomalyDetector:
     """
-    Whole-body Anomaly Detector.
+    Whole-body Anomaly Detector (NumPy Optimized).
     Processes all zones independently, maintaining separate baselines and Kalman 
     filters for each anatomical region. Returns a dictionary of triggering zones.
     """
@@ -167,169 +167,218 @@ class AnomalyDetector:
         self.agg_abs_drift_ph = agg_abs_drift_ph
         self.agg_abs_drift_temp = agg_abs_drift_temp
 
+    # ==========================================
+    # 1. RAW STREAM (SINGLE PARAMETER)
+    # ==========================================
     def detect_raw_stream(self, raw_df):
         if raw_df.empty: return raw_df, {}
         
-        df_out = raw_df.copy().sort_values('Time_Seconds')
-        df_out['Filtered_Value'] = np.nan
-        detection_times = {} # Will store {zone_id: time_in_seconds}
+        df_out = raw_df.copy().sort_values(['Zone', 'Time_Seconds'])
+        
+        # Convert to fast NumPy arrays
+        zones = df_out['Zone'].values
+        times = df_out['Time_Seconds'].values
+        values = df_out['Value'].values
+        
+        filtered_results = np.zeros(len(values))
+        detection_times = {}
 
-        # Process EVERY zone independently
-        for zone, group in df_out.groupby('Zone'):
+        for zone in np.unique(zones):
+            mask = (zones == zone)
+            z_vals, z_times = values[mask], times[mask]
+            z_filt = np.zeros(len(z_vals))
+            
             buffer = []
-            calib_indices = []
             baseline_established = False
             kf = None
             det_time = None
 
-            for idx, row in group.iterrows():
+            for i in range(len(z_vals)):
+                val = z_vals[i]
                 if not baseline_established:
-                    buffer.append(row['Value'])
-                    calib_indices.append(idx)
-                    
-                    current_conf = StatsUtils.obtain_confidence_binomial(self.alpha, self.beta, len(buffer))
-                    if current_conf >= self.target_confidence:
+                    buffer.append(val)
+                    if StatsUtils.obtain_confidence_binomial(self.alpha, self.beta, len(buffer)) >= self.target_confidence:
                         dynamic_baseline = np.median(buffer)
-                        # Instantiate a unique filter for THIS zone
                         kf = RawStreamKalman(alpha=self.alpha, beta=self.beta, initial_val=dynamic_baseline, drift_threshold=self.raw_drift_threshold)
                         baseline_established = True
-                        
-                        # Backfill the calibration period for this specific zone
-                        for c_idx in calib_indices:
-                            df_out.at[c_idx, 'Filtered_Value'] = dynamic_baseline
+                        z_filt[:i+1] = dynamic_baseline # Backfill calibration phase
                 else:
-                    is_drift, x_val = kf.check_zone(zone, row['Value'])
-                    df_out.at[idx, 'Filtered_Value'] = x_val
-                    
+                    is_drift, x_val = kf.check_zone(zone, val)
+                    z_filt[i] = x_val
                     if is_drift and det_time is None:
-                        det_time = row['Time_Seconds']
+                        det_time = z_times[i]
 
-            # Only add to alerts if this zone actually drifted
+            filtered_results[mask] = z_filt
             if det_time is not None:
                 detection_times[zone] = det_time
 
+        df_out['Filtered_Value'] = filtered_results
         return df_out, detection_times
 
+    # ==========================================
+    # 2. AGGREGATED STREAM (SINGLE PARAMETER)
+    # ==========================================
     def detect_aggregated_stream(self, agg_df):
         if agg_df.empty: return agg_df, {}
         
-        df_out = agg_df.copy().sort_values('Time_Seconds_End')
+        df_out = agg_df.copy().sort_values(['Zone', 'Time_Seconds_End'])
         if 'Binomial_%' not in df_out.columns:
             df_out['Binomial_%'] = df_out['Count'].apply(lambda n: StatsUtils.obtain_confidence_binomial(self.alpha, self.beta, n))
 
-        df_out['Filtered_Value'] = np.nan
+        zones = df_out['Zone'].values
+        times = df_out['Time_Seconds_End'].values
+        values = df_out['Median_Val'].values
+        confs = df_out['Binomial_%'].values
+        
+        filtered_results = np.zeros(len(values))
         detection_times = {}
 
-        for zone, group in df_out.groupby('Zone'):
+        for zone in np.unique(zones):
+            mask = (zones == zone)
+            z_vals, z_times, z_confs = values[mask], times[mask], confs[mask]
+            z_filt = np.zeros(len(z_vals))
+            
             baseline_established = False
             kf = None
             det_time = None
 
-            for idx, row in group.iterrows():
-                binom_conf = row['Binomial_%']
-                
+            for i in range(len(z_vals)):
+                val, conf = z_vals[i], z_confs[i]
                 if not baseline_established:
-                    if binom_conf >= self.target_confidence:
-                        dynamic_baseline = row['Median_Val']
+                    if conf >= self.target_confidence:
+                        dynamic_baseline = val
                         kf = AggregatedKalman(initial_val=dynamic_baseline, persistence=self.agg_persistence, abs_drift_threshold=self.agg_abs_drift)
                         baseline_established = True
-                        df_out.at[idx, 'Filtered_Value'] = dynamic_baseline
+                        z_filt[i] = dynamic_baseline
                 else:
-                    is_drift, x_val = kf.check_zone(zone, row['Median_Val'], binom_conf)
-                    df_out.at[idx, 'Filtered_Value'] = x_val
-                    
+                    is_drift, x_val = kf.check_zone(zone, val, conf)
+                    z_filt[i] = x_val
                     if is_drift and det_time is None:
-                        det_time = row['Time_Seconds_End']
+                        det_time = z_times[i]
 
+            filtered_results[mask] = z_filt
             if det_time is not None:
                 detection_times[zone] = det_time
 
+        df_out['Filtered_Value'] = filtered_results
         return df_out, detection_times
-    
+
+    # ==========================================
+    # 3. RAW STREAM (COMBINED PARAMETERS)
+    # ==========================================
     def detect_combined_raw_stream(self, raw_df):
         if raw_df.empty: return raw_df, {}
         
-        df_out = raw_df.copy().sort_values('Time_Seconds')
-        df_out['Filtered_pH'] = np.nan
-        df_out['Filtered_Temp'] = np.nan
+        df_out = raw_df.copy().sort_values(['Zone', 'Time_Seconds'])
+        
+        zones = df_out['Zone'].values
+        times = df_out['Time_Seconds'].values
+        val_ph = df_out['Value_pH'].values
+        val_temp = df_out['Value_Temp'].values
+        
+        filt_ph = np.zeros(len(val_ph))
+        filt_temp = np.zeros(len(val_temp))
         detection_times = {} 
 
-        for zone, group in df_out.groupby('Zone'):
+        for zone in np.unique(zones):
+            mask = (zones == zone)
+            z_times = times[mask]
+            z_ph, z_temp = val_ph[mask], val_temp[mask]
+            
+            out_ph, out_temp = np.zeros(len(z_ph)), np.zeros(len(z_temp))
             buf_ph, buf_temp = [], []
-            calib_indices = []
+            
             baseline_established = False
             kf_ph, kf_temp = None, None
-            det_time = {'ph': None, 'temp': None}
+            det_ph, det_temp = None, None
 
-            for idx, row in group.iterrows():
+            for i in range(len(z_ph)):
+                v_ph, v_temp = z_ph[i], z_temp[i]
+                
                 if not baseline_established:
-                    buf_ph.append(row['Value_pH'])
-                    buf_temp.append(row['Value_Temp'])
-                    calib_indices.append(idx)
-                    
-                    current_conf = StatsUtils.obtain_confidence_binomial(self.alpha, self.beta, len(buf_ph))
-                    if current_conf >= self.target_confidence:
-                        # USE THE SPLIT THRESHOLDS HERE
+                    buf_ph.append(v_ph)
+                    buf_temp.append(v_temp)
+                    if StatsUtils.obtain_confidence_binomial(self.alpha, self.beta, len(buf_ph)) >= self.target_confidence:
                         kf_ph = RawStreamKalman(alpha=self.alpha, beta=self.beta, initial_val=np.median(buf_ph), drift_threshold=self.raw_drift_ph)
                         kf_temp = RawStreamKalman(alpha=self.alpha, beta=self.beta, initial_val=np.median(buf_temp), drift_threshold=self.raw_drift_temp)
                         baseline_established = True
-                        
-                        for c_idx in calib_indices:
-                            df_out.at[c_idx, 'Filtered_pH'] = np.median(buf_ph)
-                            df_out.at[c_idx, 'Filtered_Temp'] = np.median(buf_temp)
+                        out_ph[:i+1] = np.median(buf_ph)
+                        out_temp[:i+1] = np.median(buf_temp)
                 else:
-                    is_drift_ph, x_ph = kf_ph.check_zone(zone, row['Value_pH'])
-                    is_drift_temp, x_temp = kf_temp.check_zone(zone, row['Value_Temp'])
+                    is_drift_ph, x_ph = kf_ph.check_zone(zone, v_ph)
+                    is_drift_temp, x_temp = kf_temp.check_zone(zone, v_temp)
                     
-                    df_out.at[idx, 'Filtered_pH'] = x_ph
-                    df_out.at[idx, 'Filtered_Temp'] = x_temp
+                    out_ph[i], out_temp[i] = x_ph, x_temp
                     
-                    if is_drift_ph and det_time['ph'] is None: det_time['ph'] = row['Time_Seconds']
-                    if is_drift_temp and det_time['temp'] is None: det_time['temp'] = row['Time_Seconds']
+                    if is_drift_ph and det_ph is None: det_ph = z_times[i]
+                    if is_drift_temp and det_temp is None: det_temp = z_times[i]
 
-            if det_time['ph'] is not None or det_time['temp'] is not None:
-                detection_times[zone] = det_time
+            filt_ph[mask] = out_ph
+            filt_temp[mask] = out_temp
+            
+            # Record detection if EITHER parameter drifted
+            if det_ph is not None or det_temp is not None:
+                detection_times[zone] = {'ph': det_ph, 'temp': det_temp}
 
+        df_out['Filtered_pH'] = filt_ph
+        df_out['Filtered_Temp'] = filt_temp
         return df_out, detection_times
 
+    # ==========================================
+    # 4. AGGREGATED STREAM (COMBINED PARAMETERS)
+    # ==========================================
     def detect_combined_aggregated_stream(self, agg_df):
         if agg_df.empty: return agg_df, {}
         
-        df_out = agg_df.copy().sort_values('Time_Seconds_End')
+        df_out = agg_df.copy().sort_values(['Zone', 'Time_Seconds_End'])
         if 'Binomial_%' not in df_out.columns:
             df_out['Binomial_%'] = df_out['Count'].apply(lambda n: StatsUtils.obtain_confidence_binomial(self.alpha, self.beta, n))
 
-        df_out['Filtered_pH'] = np.nan
-        df_out['Filtered_Temp'] = np.nan
+        zones = df_out['Zone'].values
+        times = df_out['Time_Seconds_End'].values
+        val_ph = df_out['Median_pH'].values
+        val_temp = df_out['Median_Temp'].values
+        confs = df_out['Binomial_%'].values
+        
+        filt_ph = np.zeros(len(val_ph))
+        filt_temp = np.zeros(len(val_temp))
         detection_times = {}
 
-        for zone, group in df_out.groupby('Zone'):
+        for zone in np.unique(zones):
+            mask = (zones == zone)
+            z_times, z_confs = times[mask], confs[mask]
+            z_ph, z_temp = val_ph[mask], val_temp[mask]
+            
+            out_ph, out_temp = np.zeros(len(z_ph)), np.zeros(len(z_temp))
+            
             baseline_established = False
             kf_ph, kf_temp = None, None
-            det_time = {'ph': None, 'temp': None}
+            det_ph, det_temp = None, None
 
-            for idx, row in group.iterrows():
-                binom_conf = row['Binomial_%']
+            for i in range(len(z_ph)):
+                v_ph, v_temp, conf = z_ph[i], z_temp[i], z_confs[i]
                 
                 if not baseline_established:
-                    if binom_conf >= self.target_confidence:
-                        kf_ph = AggregatedKalman(initial_val=row['Median_pH'], persistence=self.agg_persistence, abs_drift_threshold=self.agg_abs_drift_ph)
-                        kf_temp = AggregatedKalman(initial_val=row['Median_Temp'], persistence=self.agg_persistence, abs_drift_threshold=self.agg_abs_drift_temp)
+                    if conf >= self.target_confidence:
+                        kf_ph = AggregatedKalman(initial_val=v_ph, persistence=self.agg_persistence, abs_drift_threshold=self.agg_abs_drift_ph)
+                        kf_temp = AggregatedKalman(initial_val=v_temp, persistence=self.agg_persistence, abs_drift_threshold=self.agg_abs_drift_temp)
                         baseline_established = True
-                        
-                        df_out.at[idx, 'Filtered_pH'] = row['Median_pH']
-                        df_out.at[idx, 'Filtered_Temp'] = row['Median_Temp']
+                        out_ph[i], out_temp[i] = v_ph, v_temp
                 else:
-                    is_drift_ph, x_ph = kf_ph.check_zone(zone, row['Median_pH'], binom_conf)
-                    is_drift_temp, x_temp = kf_temp.check_zone(zone, row['Median_Temp'], binom_conf)
+                    is_drift_ph, x_ph = kf_ph.check_zone(zone, v_ph, conf)
+                    is_drift_temp, x_temp = kf_temp.check_zone(zone, v_temp, conf)
                     
-                    df_out.at[idx, 'Filtered_pH'] = x_ph
-                    df_out.at[idx, 'Filtered_Temp'] = x_temp
+                    out_ph[i], out_temp[i] = x_ph, x_temp
                     
-                    if is_drift_ph and det_time['ph'] is None: det_time['ph'] = row['Time_Seconds_End']
-                    if is_drift_temp and det_time['temp'] is None: det_time['temp'] = row['Time_Seconds_End']
+                    if is_drift_ph and det_ph is None: det_ph = z_times[i]
+                    if is_drift_temp and det_temp is None: det_temp = z_times[i]
 
-            if det_time['ph'] is not None or det_time['temp'] is not None:
-                detection_times[zone] = det_time
+            filt_ph[mask] = out_ph
+            filt_temp[mask] = out_temp
+            
+            if det_ph is not None or det_temp is not None:
+                detection_times[zone] = {'ph': det_ph, 'temp': det_temp}
 
+        df_out['Filtered_pH'] = filt_ph
+        df_out['Filtered_Temp'] = filt_temp
         return df_out, detection_times

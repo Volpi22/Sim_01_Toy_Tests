@@ -84,7 +84,7 @@ def process_patient(task_params):
 
 
 if __name__ == '__main__':
-    SAFE_CORES = max(1, multiprocessing.cpu_count() // 2)
+    SAFE_CORES = max(1, multiprocessing.cpu_count() // 3)
     
     print(f" Starting Parallel Dataset Assembly on {SAFE_CORES} cores...")
     os.makedirs('datasets', exist_ok=True)

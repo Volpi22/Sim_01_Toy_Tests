@@ -2,6 +2,10 @@ import pandas as pd
 import numpy as np
 import optuna
 import warnings
+import joblib
+import os
+import glob
+import multiprocessing
 
 warnings.filterwarnings('ignore')
 optuna.logging.set_verbosity(optuna.logging.WARNING) 
@@ -108,6 +112,9 @@ class FilterOptimizer:
 
     def objective_raw(self, trial):
         """1D/2D Optimization for the Raw Stream Kalman Filter."""
+
+        print(f"  [Worker {os.getpid()}] Starting Trial {trial.number}...")
+
         if self.param_type == 'ph':
             thresh = trial.suggest_float("raw_drift_threshold", 0.01, 2.0, step=0.05)
             detector = AnomalyDetector(alpha=self.alpha, beta=self.current_beta, raw_drift_threshold=thresh)
@@ -133,7 +140,10 @@ class FilterOptimizer:
                 'Detection_Times': det_times
             })
 
-        return self.evaluator.calculate_cost(results)
+            
+        cost = self.evaluator.calculate_cost(results)
+        print(f"  [Trial {trial.number}] Finished. Cost: {cost:.4f}")
+        return cost
 
     def objective_agg(self, trial):
         """2D/3D Optimization for the Aggregated Stream Kalman Filter."""
@@ -197,10 +207,13 @@ def run_all_optimizations(datasets_to_tune=['ph', 'temp', 'combined']):
         )
         
         n_trials_raw = 40 if p_type == 'combined' else 20
+
+        # SAFE_CORES = max(1, multiprocessing.cpu_count() // 3)
+        SAFE_CORES = 4
         
-        print(f"-> Running {n_trials_raw} trials for {p_type.upper()} RAW on all CPU cores...")
-        # Add n_jobs=-1 to use all available CPU cores
-        study_raw.optimize(raw_opt.objective_raw, n_trials=n_trials_raw, n_jobs=-1, show_progress_bar=True) 
+        print(f"-> Running {n_trials_raw} trials for {p_type.upper()} RAW on SAFE CPU cores...")
+        
+        study_raw.optimize(raw_opt.objective_raw, n_trials=n_trials_raw, n_jobs=SAFE_CORES, show_progress_bar=False) 
         
         completed_studies[p_type]['raw'] = study_raw
         
@@ -221,9 +234,8 @@ def run_all_optimizations(datasets_to_tune=['ph', 'temp', 'combined']):
         
         n_trials_agg = 60 if p_type == 'combined' else 30
         
-        print(f"-> Running {n_trials_agg} trials for {p_type.upper()} AGGREGATED on all CPU cores...")
-        # Add n_jobs=-1 to use all available CPU cores
-        study_agg.optimize(agg_opt.objective_agg, n_trials=n_trials_agg, n_jobs=-1, show_progress_bar=True)
+        print(f"-> Running {n_trials_agg} trials for {p_type.upper()} AGGREGATED on SAFE CPU cores...")
+        study_agg.optimize(agg_opt.objective_agg, n_trials=n_trials_agg, n_jobs=SAFE_CORES, show_progress_bar=True)
         
         completed_studies[p_type]['agg'] = study_agg
 
@@ -232,3 +244,42 @@ def run_all_optimizations(datasets_to_tune=['ph', 'temp', 'combined']):
         
     print("\n All parallel optimizations complete!")
     return completed_studies
+
+if __name__ == '__main__':
+    # --- 0. CLEANUP & SETUP ---
+    print(" Cleaning up old optimization data...")
+    
+    # Remove old SQLite databases
+    for db_file in glob.glob("optuna_study_*.db"):
+        try:
+            os.remove(db_file)
+            print(f"  -> Deleted: {db_file}")
+        except Exception as e:
+            print(f"  [!] Could not delete {db_file}: {e}")
+
+    # Ensure results directory exists
+    os.makedirs('tuning_results', exist_ok=True)
+    
+    # Remove old pickle result if it exists to prevent loading stale data later
+    results_path = 'tuning_results/completed_studies.pkl'
+    if os.path.exists(results_path):
+        os.remove(results_path)
+        print(f"  -> Deleted old results file: {results_path}")
+
+    print("\n" + "="*60)
+    print(" STARTING TERMINAL OPTIMIZATION ENGINE")
+    print("="*60 + "\n")
+
+    # --- 1. EXECUTION ---
+    # This runs the parallelized studies using all cores
+    studies = run_all_optimizations(['ph', 'temp', 'combined'])
+    
+    # --- 2. STORAGE ---
+    # Save the final dictionary for Jupyter retrieval
+    joblib.dump(studies, results_path)
+    
+    print("\n" + "="*60)
+    print(f" SUCCESS: Optimization complete.")
+    print(f" Results stored in: {results_path}")
+    print(" You can now switch to your Jupyter Notebook to visualize.")
+    print("="*60)
