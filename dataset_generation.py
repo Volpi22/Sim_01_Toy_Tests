@@ -10,35 +10,68 @@ from diseases import DiseaseSimulator
 TRACES_DIR = os.path.expanduser("~/EXPERIMENTS/Sim_01_Toy_Tests/raw_ns3_traces")
 
 N_CSVS_GENERATED = 5  
-PH_DISEASES = ['systemic_alkalosis_ph', 'dka_ph', 'stroke_ph', 'nec_ph', 'rta_ph']
 RUNS_PER_DISEASE_PER_CSV = 4
-HEALTHY_RUNS_PER_CSV = len(PH_DISEASES) * RUNS_PER_DISEASE_PER_CSV
 
-NUM_CORES = multiprocessing.cpu_count()-8
+# Map the exact keys from your DiseaseSimulator to their respective datasets
+DISEASES = {
+    'ph': [
+        'systemic_alkalosis_ph', 'dka_ph', 'stroke_ph', 'nec_ph', 'rta_ph'
+    ],
+    'temp': [
+        'systemic_fever_temp', 'endocarditis_temp', 'meningitis_temp', 'arterial_occlusion_temp', 'dvt_temp'
+    ],
+    'combined': [
+        'septic_shock_combined', 'malignant_hyperthermia_combined', 'ischemic_bowel_combined', 'pyelo_combined', 'ischemia_combined'
+    ]
+}
+
+# Define beta (measurement error) for each sensor type. 
+# Alpha is kept constant at 0.3 for all.
+BETA_VALUES = {
+    'ph': 0.1,
+    'temp': 0.01,
+    'combined': 0.1 # Using the higher beta as a worst-case scenario for the combined model
+}
+
+# Leave cores free for OS stability
+NUM_CORES = max(1, multiprocessing.cpu_count() - 3)
 # ==========================================
 
 def process_patient(task_params):
     """Worker function to simulate a single patient and return the DataFrames."""
-    csv_path, disease_key, is_healthy, sim_id_str = task_params
+    csv_path, param_type, disease_key, is_healthy, sim_id_str = task_params
+    
+    # Grab the specific beta for this sensor type. Alpha is always 0.3.
+    current_beta = BETA_VALUES[param_type]
+    current_alpha = 0.3
     
     simulator = DiseaseSimulator(df_path=csv_path)
     
-    if is_healthy:
-        raw_df, agg_df, _ = simulator.run_single_disease(
-            alpha=0.3, beta=0.10, disease_key=disease_key, safe_start_time=86400
-        )
-        label = 'healthy'
-        target_zone = -1
-        t_start = 86400.00
-        t_peak = 86400.00
+    # Select the correct simulation function based on the parameter type
+    if param_type == 'combined':
+        if is_healthy:
+            raw_df, agg_df, _ = simulator.run_combined_disease(
+                alpha=current_alpha, beta=current_beta, disease_key=disease_key, safe_start_time=86400
+            )
+        else:
+            raw_df, agg_df, raw_t_start = simulator.run_combined_disease(
+                alpha=current_alpha, beta=current_beta, disease_key=disease_key
+            )
     else:
-        raw_df, agg_df, raw_t_start = simulator.run_single_disease(
-            alpha=0.3, beta=0.10, disease_key=disease_key
-        )
-        label = disease_key
-        target_zone = simulator.diseases[disease_key]['zones'][0] if len(simulator.diseases[disease_key]['zones']) == 1 else -1
-        t_start = round(raw_t_start, 2)
-        t_peak = round(t_start + simulator.diseases[disease_key]['progression_time'], 2)
+        if is_healthy:
+            raw_df, agg_df, _ = simulator.run_single_disease(
+                alpha=current_alpha, beta=current_beta, disease_key=disease_key, safe_start_time=86400
+            )
+        else:
+            raw_df, agg_df, raw_t_start = simulator.run_single_disease(
+                alpha=current_alpha, beta=current_beta, disease_key=disease_key
+            )
+
+    # Calculate Ground Truth Labels
+    label = 'healthy' if is_healthy else disease_key
+    target_zone = -1 if is_healthy else (simulator.diseases[disease_key]['zones'][0] if len(simulator.diseases[disease_key]['zones']) == 1 else -1)
+    t_start = 86400.00 if is_healthy else round(raw_t_start, 2)
+    t_peak = 86400.00 if is_healthy else round(t_start + simulator.diseases[disease_key]['progression_time'], 2)
 
     # Stamp DataFrames
     for df in [raw_df, agg_df]:
@@ -52,68 +85,77 @@ def process_patient(task_params):
 
 
 if __name__ == '__main__':
-    total_diseased = N_CSVS_GENERATED * len(PH_DISEASES) * RUNS_PER_DISEASE_PER_CSV
-    total_healthy = N_CSVS_GENERATED * HEALTHY_RUNS_PER_CSV
-    total_tasks = total_diseased + total_healthy
-    
-    print(f" Starting PARALLEL Dataset Assembly on {NUM_CORES} cores...")
-    print(f" Processing {total_tasks} total patient records...")
-
-    # 1. Build the list of tasks
-    tasks = []
-    sim_counter = 1
-    
-    for csv_idx in range(1, N_CSVS_GENERATED + 1):
-        csv_path = os.path.join(TRACES_DIR, f"{csv_idx}_pH.csv")
-        if not os.path.exists(csv_path):
-            raise FileNotFoundError(f"Missing trace file: {csv_path}")
-            
-        # Add Diseased Tasks
-        for disease in PH_DISEASES:
-            for _ in range(RUNS_PER_DISEASE_PER_CSV):
-                sim_id = f"sim_ph_{sim_counter:04d}"
-                tasks.append((csv_path, disease, False, sim_id))
-                sim_counter += 1
-                
-        # Add Healthy Tasks
-        for _ in range(HEALTHY_RUNS_PER_CSV):
-            sim_id = f"sim_ph_{sim_counter:04d}"
-            # Pass the first disease key just to satisfy the simulator requirements
-            tasks.append((csv_path, PH_DISEASES[0], True, sim_id))
-            sim_counter += 1
-
-    # 2. Execute tasks in parallel
-    master_raw_list = []
-    master_agg_list = []
-    
-    with ProcessPoolExecutor(max_workers=NUM_CORES) as executor:
-        # Submit all tasks and show progress
-        futures = {executor.submit(process_patient, task): task for task in tasks}
-        
-        completed = 0
-        for future in as_completed(futures):
-            raw_df, agg_df, sim_id_str = future.result()
-            master_raw_list.append(raw_df)
-            master_agg_list.append(agg_df)
-            
-            completed += 1
-            if completed % 10 == 0 or completed == total_tasks:
-                print(f"  -> Progress: {completed}/{total_tasks} patients processed...")
-
-    # 3. Concatenate and Save
-    print("\nAll parallel tasks finished! Concatenating DataFrames...")
-    final_raw_df = pd.concat(master_raw_list, ignore_index=True)
-    final_agg_df = pd.concat(master_agg_list, ignore_index=True)
-
-    print("Sorting data to restore sequential order...")
-    # kind='stable' ensures that the perfect chronological order generated 
-    # by the worker threads is preserved while grouping the IDs back together.
-    final_raw_df.sort_values(by=['Simulation_ID'], kind='stable', inplace=True)
-    final_agg_df.sort_values(by=['Simulation_ID'], kind='stable', inplace=True)
-
-    print("Saving to Parquet files...")
+    print(f" Starting Massive Dataset Assembly on {NUM_CORES} cores...")
     os.makedirs('datasets', exist_ok=True)
-    final_raw_df.to_parquet('datasets/tuning_dataset_ph_raw.parquet', index=False)
-    final_agg_df.to_parquet('datasets/tuning_dataset_ph_agg.parquet', index=False)
 
-    print(f"DONE! Successfully compiled {total_tasks} records in parallel.")
+    # Loop through pH, Temp, and Combined
+    for param_type, disease_list in DISEASES.items():
+        print(f"\n{'='*60}")
+        print(f" ASSEMBLING {param_type.upper()} DATASETS ")
+        print(f"{'='*60}")
+
+        healthy_runs_per_csv = len(disease_list) * RUNS_PER_DISEASE_PER_CSV
+        total_diseased = N_CSVS_GENERATED * len(disease_list) * RUNS_PER_DISEASE_PER_CSV
+        total_healthy = N_CSVS_GENERATED * healthy_runs_per_csv
+        total_tasks = total_diseased + total_healthy
+        
+        print(f" Processing {total_tasks} patient records for {param_type.upper()}...")
+
+        # 1. Build the list of tasks for this parameter type
+        tasks = []
+        sim_counter = 1
+        
+        for csv_idx in range(1, N_CSVS_GENERATED + 1):
+            # Changed to match your generalized naming convention (e.g., 1.csv)
+            csv_path = os.path.join(TRACES_DIR, f"{csv_idx}.csv")
+            if not os.path.exists(csv_path):
+                raise FileNotFoundError(f"Missing trace file: {csv_path}")
+                
+            # Add Diseased Tasks
+            for disease in disease_list:
+                for _ in range(RUNS_PER_DISEASE_PER_CSV):
+                    sim_id = f"sim_{param_type}_{sim_counter:04d}"
+                    tasks.append((csv_path, param_type, disease, False, sim_id))
+                    sim_counter += 1
+                    
+            # Add Healthy Tasks
+            for _ in range(healthy_runs_per_csv):
+                sim_id = f"sim_{param_type}_{sim_counter:04d}"
+                tasks.append((csv_path, param_type, disease_list[0], True, sim_id))
+                sim_counter += 1
+
+        # 2. Execute tasks in parallel
+        master_raw_list = []
+        master_agg_list = []
+        
+        with ProcessPoolExecutor(max_workers=NUM_CORES) as executor:
+            futures = {executor.submit(process_patient, task): task for task in tasks}
+            
+            completed = 0
+            for future in as_completed(futures):
+                raw_df, agg_df, sim_id_str = future.result()
+                master_raw_list.append(raw_df)
+                master_agg_list.append(agg_df)
+                
+                completed += 1
+                if completed % 10 == 0 or completed == total_tasks:
+                    print(f"  -> Progress: {completed}/{total_tasks} patients processed...")
+
+        # 3. Concatenate, Sort, and Save
+        print(f"\n {param_type.upper()} tasks finished! Sorting and Concatenating...")
+        final_raw_df = pd.concat(master_raw_list, ignore_index=True)
+        final_agg_df = pd.concat(master_agg_list, ignore_index=True)
+
+        final_raw_df.sort_values(by=['Simulation_ID'], kind='stable', inplace=True)
+        final_agg_df.sort_values(by=['Simulation_ID'], kind='stable', inplace=True)
+
+        # Dynamically name the output files based on the loop type
+        raw_out_path = f'datasets/tuning_dataset_{param_type}_raw.parquet'
+        agg_out_path = f'datasets/tuning_dataset_{param_type}_agg.parquet'
+        
+        final_raw_df.to_parquet(raw_out_path, index=False)
+        final_agg_df.to_parquet(agg_out_path, index=False)
+
+        print(f" {param_type.upper()} Datasets Saved Successfully!")
+
+    print("\n ALL DATASETS GENERATED SUCCESSFULLY! You are ready for Optuna Tuning.")
