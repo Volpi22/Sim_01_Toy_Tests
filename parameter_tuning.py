@@ -13,7 +13,7 @@ class ClinicalCostEvaluator:
     Evaluates filter performance based on the custom clinical Cost Function:
     Cost = (w1 * FPR) + (w2 * FNR) + (w3 * NPL)
     """
-    def __init__(self, w1=0.4, w2=0.4, w3=0.2, total_zones=10):
+    def __init__(self, w1=1000.0, w2=500.0, w3=1, total_zones=20):
         self.w1 = w1  
         self.w2 = w2  
         self.w3 = w3  
@@ -86,6 +86,15 @@ class FilterOptimizer:
         self.param_type = param_type
         self.evaluator = ClinicalCostEvaluator()
 
+        # Match the alpha/beta to the dataset generation exact values
+        self.alpha = 0.3
+        self.beta_map = {
+            'ph': 0.10,
+            'temp': 0.01,
+            'combined': 0.10
+        }
+        self.current_beta = self.beta_map[self.param_type]
+
         self.simulations = []
         for sim_id, group in self.df.groupby('Simulation_ID'):
             first_row = group.iloc[0]
@@ -101,14 +110,14 @@ class FilterOptimizer:
         """1D/2D Optimization for the Raw Stream Kalman Filter."""
         if self.param_type == 'ph':
             thresh = trial.suggest_float("raw_drift_threshold", 0.01, 2.0, step=0.05)
-            detector = AnomalyDetector(alpha=0.3, beta=0.10, raw_drift_threshold=thresh)
+            detector = AnomalyDetector(alpha=self.alpha, beta=self.current_beta, raw_drift_threshold=thresh)
         elif self.param_type == 'temp':
-            thresh = trial.suggest_float("raw_drift_threshold", 1.0, 5.0, step=0.1)
-            detector = AnomalyDetector(alpha=0.3, beta=0.10, raw_drift_threshold=thresh)
+            thresh = trial.suggest_float("raw_drift_threshold", 0.5, 5.0, step=0.1)
+            detector = AnomalyDetector(alpha=self.alpha, beta=self.current_beta, raw_drift_threshold=thresh)
         elif self.param_type == 'combined':
             thresh_ph = trial.suggest_float("raw_drift_ph", 0.01, 2.0, step=0.05)
-            thresh_temp = trial.suggest_float("raw_drift_temp", 1.0, 5.0, step=0.1)
-            detector = AnomalyDetector(alpha=0.3, beta=0.10, raw_drift_ph=thresh_ph, raw_drift_temp=thresh_temp)
+            thresh_temp = trial.suggest_float("raw_drift_temp", 0.5, 5.0, step=0.1)
+            detector = AnomalyDetector(alpha=self.alpha, beta=self.current_beta, raw_drift_ph=thresh_ph, raw_drift_temp=thresh_temp)
 
         results = []
         for sim in self.simulations:
@@ -132,14 +141,14 @@ class FilterOptimizer:
 
         if self.param_type == 'ph':
             abs_drift = trial.suggest_float("agg_abs_drift", 0.01, 0.20, step=0.01)
-            detector = AnomalyDetector(alpha=0.3, beta=0.10, agg_persistence=persistence, agg_abs_drift=abs_drift)
+            detector = AnomalyDetector(alpha=self.alpha, beta=self.current_beta, agg_persistence=persistence, agg_abs_drift=abs_drift)
         elif self.param_type == 'temp':
             abs_drift = trial.suggest_float("agg_abs_drift", 0.1, 1.5, step=0.1)
-            detector = AnomalyDetector(alpha=0.3, beta=0.10, agg_persistence=persistence, agg_abs_drift=abs_drift)
+            detector = AnomalyDetector(alpha=self.alpha, beta=self.current_beta, agg_persistence=persistence, agg_abs_drift=abs_drift)
         elif self.param_type == 'combined':
             drift_ph = trial.suggest_float("agg_abs_drift_ph", 0.01, 0.20, step=0.01)
             drift_temp = trial.suggest_float("agg_abs_drift_temp", 0.1, 1.5, step=0.1)
-            detector = AnomalyDetector(alpha=0.3, beta=0.10, agg_persistence=persistence, agg_abs_drift_ph=drift_ph, agg_abs_drift_temp=drift_temp)
+            detector = AnomalyDetector(alpha=self.alpha, beta=self.current_beta, agg_persistence=persistence, agg_abs_drift_ph=drift_ph, agg_abs_drift_temp=drift_temp)
 
         results = []
         for sim in self.simulations:
@@ -172,15 +181,26 @@ def run_all_optimizations(datasets_to_tune=['ph', 'temp', 'combined']):
         
         completed_studies[p_type] = {}
         
+        # We create a local SQLite database for this parameter type so Optuna 
+        # can safely coordinate multiple CPU cores at the same time.
+        db_url = f"sqlite:///optuna_study_{p_type}.db"
+        
         # --- 1. RAW STREAM TUNING ---
         raw_opt = FilterOptimizer(f'datasets/tuning_dataset_{p_type}_raw.parquet', stream_type='raw', param_type=p_type)
-        study_raw = optuna.create_study(direction="minimize", study_name=f"Raw_{p_type}")
         
-        # Combined needs more trials due to wider search space (2 parameters instead of 1)
+        # Add the storage backend
+        study_raw = optuna.create_study(
+            direction="minimize", 
+            study_name=f"Raw_{p_type}",
+            storage=db_url,
+            load_if_exists=True
+        )
+        
         n_trials_raw = 40 if p_type == 'combined' else 20
         
-        print(f"-> Running {n_trials_raw} trials for {p_type.upper()} RAW...")
-        study_raw.optimize(raw_opt.objective_raw, n_trials=n_trials_raw, show_progress_bar=True) 
+        print(f"-> Running {n_trials_raw} trials for {p_type.upper()} RAW on all CPU cores...")
+        # Add n_jobs=-1 to use all available CPU cores
+        study_raw.optimize(raw_opt.objective_raw, n_trials=n_trials_raw, n_jobs=-1, show_progress_bar=True) 
         
         completed_studies[p_type]['raw'] = study_raw
         
@@ -190,18 +210,25 @@ def run_all_optimizations(datasets_to_tune=['ph', 'temp', 'combined']):
 
         # --- 2. AGGREGATED STREAM TUNING ---
         agg_opt = FilterOptimizer(f'datasets/tuning_dataset_{p_type}_agg.parquet', stream_type='agg', param_type=p_type)
-        study_agg = optuna.create_study(direction="minimize", study_name=f"Agg_{p_type}")
         
-        # Combined needs 60 trials to explore 3 dimensions
+        # Add the storage backend
+        study_agg = optuna.create_study(
+            direction="minimize", 
+            study_name=f"Agg_{p_type}",
+            storage=db_url,
+            load_if_exists=True
+        )
+        
         n_trials_agg = 60 if p_type == 'combined' else 30
         
-        print(f"-> Running {n_trials_agg} trials for {p_type.upper()} AGGREGATED...")
-        study_agg.optimize(agg_opt.objective_agg, n_trials=n_trials_agg, show_progress_bar=True)
+        print(f"-> Running {n_trials_agg} trials for {p_type.upper()} AGGREGATED on all CPU cores...")
+        # Add n_jobs=-1 to use all available CPU cores
+        study_agg.optimize(agg_opt.objective_agg, n_trials=n_trials_agg, n_jobs=-1, show_progress_bar=True)
         
         completed_studies[p_type]['agg'] = study_agg
 
         print(f"\n[{p_type.upper()} AGG] Best Params: {study_agg.best_params}")
         print(f"[{p_type.upper()} AGG] Lowest Cost:   {study_agg.best_value:.4f}\n")
         
-    print("\n All optimizations complete!")
+    print("\n All parallel optimizations complete!")
     return completed_studies
