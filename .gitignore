@@ -5,3 +5,7 @@ log_output.txt
 position_data.csv
 \datasets
 \raw_ns3_traces
+optuna_study_ph.db
+optuna_study_temp.db
+optuna_study_combined.db
+
