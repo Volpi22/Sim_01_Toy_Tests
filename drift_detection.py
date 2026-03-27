@@ -51,8 +51,8 @@ class RawStreamKalman:
         z['x'] = z['x'] + k_gain * residual            # Update estimate
         z['p'] = (1 - k_gain) * z['p']                 # Update uncertainty
 
-        # 3. DRIFT DETECTION: Accumulate sustained errors
-        z['cum_res'] += residual
+        # 3. DRIFT DETECTION: Accumulate sustained errors with a leakage factor to prevent over-sensitivity to constant noise
+        z['cum_res'] = (z['cum_res'] + residual) * 0.98
         is_drift = abs(z['cum_res']) > self.drift_threshold
         
         if is_drift:
@@ -138,7 +138,6 @@ class AggregatedKalman:
 
         # Trigger anomaly only if the bad conditions persist for 'n' consecutive packets
         return (z['hit_counter'] >= self.persistence), current_estimate
-    
 
 # ==========================================
 # ANOMALY DETECTOR ROUTER
@@ -152,10 +151,16 @@ class AnomalyDetector:
     """
     def __init__(self, alpha=0.05, beta=0.1, target_confidence=70.0, 
                  raw_drift_threshold=2.5, raw_drift_ph=1.5, raw_drift_temp=3.5, 
-                 agg_persistence=3, agg_abs_drift=0.05, agg_abs_drift_ph=0.10, agg_abs_drift_temp=0.5):
+                 agg_persistence=3, agg_abs_drift=0.05, agg_abs_drift_ph=0.10, agg_abs_drift_temp=0.5,
+                 beta_ph=None, beta_temp=None): # <-- Added specific betas
         
         self.alpha = alpha
-        self.beta = beta
+        self.beta = beta # Used for single streams and Binomial Confidence
+        
+        # If specific betas aren't provided, default to the main beta
+        self.beta_ph = beta_ph if beta_ph is not None else beta
+        self.beta_temp = beta_temp if beta_temp is not None else beta
+        
         self.target_confidence = target_confidence
         
         self.raw_drift_threshold = raw_drift_threshold
@@ -298,9 +303,11 @@ class AnomalyDetector:
                 if not baseline_established:
                     buf_ph.append(v_ph)
                     buf_temp.append(v_temp)
+                    # Notice we still use self.beta (the highest one) to compute the combined binomial confidence
                     if StatsUtils.obtain_confidence_binomial(self.alpha, self.beta, len(buf_ph)) >= self.target_confidence:
-                        kf_ph = RawStreamKalman(alpha=self.alpha, beta=self.beta, initial_val=np.median(buf_ph), drift_threshold=self.raw_drift_ph)
-                        kf_temp = RawStreamKalman(alpha=self.alpha, beta=self.beta, initial_val=np.median(buf_temp), drift_threshold=self.raw_drift_temp)
+                        # Here we use the specific betas!
+                        kf_ph = RawStreamKalman(alpha=self.alpha, beta=self.beta_ph, initial_val=np.median(buf_ph), drift_threshold=self.raw_drift_ph)
+                        kf_temp = RawStreamKalman(alpha=self.alpha, beta=self.beta_temp, initial_val=np.median(buf_temp), drift_threshold=self.raw_drift_temp)
                         baseline_established = True
                         out_ph[:i+1] = np.median(buf_ph)
                         out_temp[:i+1] = np.median(buf_temp)
@@ -332,6 +339,7 @@ class AnomalyDetector:
         
         df_out = agg_df.copy().sort_values(['Zone', 'Time_Seconds_End'])
         if 'Binomial_%' not in df_out.columns:
+            # Still using the highest self.beta for conservative binomial calculation
             df_out['Binomial_%'] = df_out['Count'].apply(lambda n: StatsUtils.obtain_confidence_binomial(self.alpha, self.beta, n))
 
         zones = df_out['Zone'].values

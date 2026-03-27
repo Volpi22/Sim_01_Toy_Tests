@@ -18,7 +18,7 @@ class ClinicalCostEvaluator:
     Evaluates filter performance based on the custom clinical Cost Function:
     Cost = (w1 * FPR) + (w2 * FNR) + (w3 * NPL)
     """
-    def __init__(self, w1=1000.0, w2=500.0, w3=1, total_zones=20):
+    def __init__(self, w1=1000.0, w2=1000.0, w3=300.0, total_zones=20):
         self.w1 = w1  
         self.w2 = w2  
         self.w3 = w3  
@@ -124,7 +124,16 @@ class FilterOptimizer:
         elif self.param_type == 'combined':
             thresh_ph = trial.suggest_float("raw_drift_ph", 0.01, 2.0, step=0.05)
             thresh_temp = trial.suggest_float("raw_drift_temp", 0.5, 5.0, step=0.1)
-            detector = AnomalyDetector(alpha=self.alpha, beta=self.current_beta, raw_drift_ph=thresh_ph, raw_drift_temp=thresh_temp)
+            
+            # ---> UPDATED: Passing the specific betas for the combined raw stream! <---
+            detector = AnomalyDetector(
+                alpha=self.alpha, 
+                beta=self.current_beta, 
+                beta_ph=self.beta_map['ph'], 
+                beta_temp=self.beta_map['temp'],
+                raw_drift_ph=thresh_ph, 
+                raw_drift_temp=thresh_temp
+            )
 
         results = []
         for sim in self.simulations:
@@ -148,7 +157,7 @@ class FilterOptimizer:
         """2D/3D Optimization for the Aggregated Stream Kalman Filter."""
         print(f"  [Worker {os.getpid()}] Starting Aggregated Trial {trial.number}...")
 
-        persistence = trial.suggest_int("agg_persistence", 1, 6)
+        persistence = trial.suggest_int("agg_persistence", 1, 3)
 
         if self.param_type == 'ph':
             abs_drift = trial.suggest_float("agg_abs_drift", 0.01, 0.20, step=0.01)
@@ -159,7 +168,17 @@ class FilterOptimizer:
         elif self.param_type == 'combined':
             drift_ph = trial.suggest_float("agg_abs_drift_ph", 0.01, 0.20, step=0.01)
             drift_temp = trial.suggest_float("agg_abs_drift_temp", 0.1, 1.5, step=0.1)
-            detector = AnomalyDetector(alpha=self.alpha, beta=self.current_beta, agg_persistence=persistence, agg_abs_drift_ph=drift_ph, agg_abs_drift_temp=drift_temp)
+            
+            # ---> UPDATED: Passing the specific betas for the combined agg stream! <---
+            detector = AnomalyDetector(
+                alpha=self.alpha, 
+                beta=self.current_beta, 
+                beta_ph=self.beta_map['ph'], 
+                beta_temp=self.beta_map['temp'],
+                agg_persistence=persistence, 
+                agg_abs_drift_ph=drift_ph, 
+                agg_abs_drift_temp=drift_temp
+            )
 
         results = []
         for sim in self.simulations:
@@ -238,6 +257,9 @@ def run_all_optimizations(datasets_to_tune=['ph', 'temp', 'combined'], save_path
         joblib.dump(completed_studies, save_path)
         print(f"\n[💾] PROGRESS SAVED: {p_type.upper()} safely written to {save_path}")
         
+        # 🧹 FORCE A FINAL GARBAGE COLLECTION AT THE END OF THE LOOP
+        gc.collect() 
+        
     print("\n All parallel optimizations complete!")
     return completed_studies
 
@@ -260,7 +282,6 @@ if __name__ == '__main__':
     print("="*60 + "\n")
 
     # --- 1. EXECUTION & PROGRESSIVE SAVING ---
-    # We pass the results_path into the function so it can save incrementally
     run_all_optimizations(['ph', 'temp', 'combined'], save_path=results_path)
     
     print("\n" + "="*60)
