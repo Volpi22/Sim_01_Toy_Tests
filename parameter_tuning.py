@@ -4,6 +4,7 @@ import optuna
 import warnings
 import joblib
 import os
+import gc
 import glob
 import multiprocessing
 
@@ -112,7 +113,6 @@ class FilterOptimizer:
 
     def objective_raw(self, trial):
         """1D/2D Optimization for the Raw Stream Kalman Filter."""
-
         print(f"  [Worker {os.getpid()}] Starting Trial {trial.number}...")
 
         if self.param_type == 'ph':
@@ -139,7 +139,6 @@ class FilterOptimizer:
                 'True_t_peak': sim['True_t_peak'],
                 'Detection_Times': det_times
             })
-
             
         cost = self.evaluator.calculate_cost(results)
         print(f"  [Trial {trial.number}] Finished. Cost: {cost:.4f}")
@@ -147,6 +146,8 @@ class FilterOptimizer:
 
     def objective_agg(self, trial):
         """2D/3D Optimization for the Aggregated Stream Kalman Filter."""
+        print(f"  [Worker {os.getpid()}] Starting Aggregated Trial {trial.number}...")
+
         persistence = trial.suggest_int("agg_persistence", 1, 6)
 
         if self.param_type == 'ph':
@@ -174,13 +175,14 @@ class FilterOptimizer:
                 'Detection_Times': det_times
             })
 
-        return self.evaluator.calculate_cost(results)
+        cost = self.evaluator.calculate_cost(results)
+        print(f"  [Trial {trial.number}] Finished Aggregated. Cost: {cost:.4f}")
+        return cost
 
 
-def run_all_optimizations(datasets_to_tune=['ph', 'temp', 'combined']):
+def run_all_optimizations(datasets_to_tune=['ph', 'temp', 'combined'], save_path='tuning_results/completed_studies.pkl'):
     """
-    Executes the entire hyperparameter tuning pipeline for the specified datasets.
-    Returns a dictionary of all completed Optuna studies.
+    Executes the tuning pipeline and saves progress progressively to free memory.
     """
     completed_studies = {}
 
@@ -190,57 +192,51 @@ def run_all_optimizations(datasets_to_tune=['ph', 'temp', 'combined']):
         print(f"{'='*60}\n")
         
         completed_studies[p_type] = {}
-        
-        # We create a local SQLite database for this parameter type so Optuna 
-        # can safely coordinate multiple CPU cores at the same time.
         db_url = f"sqlite:///optuna_study_{p_type}.db"
+        SAFE_CORES = 5
         
-        # --- 1. RAW STREAM TUNING ---
+        # ==========================================
+        # 1. RAW STREAM TUNING
+        # ==========================================
         raw_opt = FilterOptimizer(f'datasets/tuning_dataset_{p_type}_raw.parquet', stream_type='raw', param_type=p_type)
-        
-        # Add the storage backend
-        study_raw = optuna.create_study(
-            direction="minimize", 
-            study_name=f"Raw_{p_type}",
-            storage=db_url,
-            load_if_exists=True
-        )
+        study_raw = optuna.create_study(direction="minimize", study_name=f"Raw_{p_type}", storage=db_url, load_if_exists=True)
         
         n_trials_raw = 40 if p_type == 'combined' else 20
-
-        # SAFE_CORES = max(1, multiprocessing.cpu_count() // 3)
-        SAFE_CORES = 4
-        
-        print(f"-> Running {n_trials_raw} trials for {p_type.upper()} RAW on SAFE CPU cores...")
+        print(f"-> Running {n_trials_raw} trials for {p_type.upper()} RAW...")
         
         study_raw.optimize(raw_opt.objective_raw, n_trials=n_trials_raw, n_jobs=SAFE_CORES, show_progress_bar=False) 
-        
         completed_studies[p_type]['raw'] = study_raw
         
-        print(f"\n[{p_type.upper()} RAW] Best Params: {study_raw.best_params}")
-        print(f"[{p_type.upper()} RAW] Lowest Cost:   {study_raw.best_value:.4f}\n")
-        print("-" * 40)
+        print(f"[{p_type.upper()} RAW] Lowest Cost:   {study_raw.best_value:.4f}")
 
-        # --- 2. AGGREGATED STREAM TUNING ---
+        # 🧹 FREE RAM BEFORE LOADING THE NEXT DATASET
+        del raw_opt
+        import gc
+        gc.collect()
+
+        # ==========================================
+        # 2. AGGREGATED STREAM TUNING
+        # ==========================================
         agg_opt = FilterOptimizer(f'datasets/tuning_dataset_{p_type}_agg.parquet', stream_type='agg', param_type=p_type)
-        
-        # Add the storage backend
-        study_agg = optuna.create_study(
-            direction="minimize", 
-            study_name=f"Agg_{p_type}",
-            storage=db_url,
-            load_if_exists=True
-        )
+        study_agg = optuna.create_study(direction="minimize", study_name=f"Agg_{p_type}", storage=db_url, load_if_exists=True)
         
         n_trials_agg = 60 if p_type == 'combined' else 30
+        print(f"-> Running {n_trials_agg} trials for {p_type.upper()} AGGREGATED...")
         
-        print(f"-> Running {n_trials_agg} trials for {p_type.upper()} AGGREGATED on SAFE CPU cores...")
-        study_agg.optimize(agg_opt.objective_agg, n_trials=n_trials_agg, n_jobs=SAFE_CORES, show_progress_bar=True)
-        
+        study_agg.optimize(agg_opt.objective_agg, n_trials=n_trials_agg, n_jobs=SAFE_CORES, show_progress_bar=False)
         completed_studies[p_type]['agg'] = study_agg
 
-        print(f"\n[{p_type.upper()} AGG] Best Params: {study_agg.best_params}")
-        print(f"[{p_type.upper()} AGG] Lowest Cost:   {study_agg.best_value:.4f}\n")
+        print(f"[{p_type.upper()} AGG] Lowest Cost:   {study_agg.best_value:.4f}")
+
+        # 🧹 FREE RAM AGAIN
+        del agg_opt
+        gc.collect()
+
+        # ==========================================
+        # 3. PROGRESSIVE SAVE (THE SAFETY NET)
+        # ==========================================
+        joblib.dump(completed_studies, save_path)
+        print(f"\n[💾] PROGRESS SAVED: {p_type.upper()} safely written to {save_path}")
         
     print("\n All parallel optimizations complete!")
     return completed_studies
@@ -248,38 +244,26 @@ def run_all_optimizations(datasets_to_tune=['ph', 'temp', 'combined']):
 if __name__ == '__main__':
     # --- 0. CLEANUP & SETUP ---
     print(" Cleaning up old optimization data...")
-    
-    # Remove old SQLite databases
     for db_file in glob.glob("optuna_study_*.db"):
         try:
             os.remove(db_file)
-            print(f"  -> Deleted: {db_file}")
-        except Exception as e:
-            print(f"  [!] Could not delete {db_file}: {e}")
+        except Exception:
+            pass
 
-    # Ensure results directory exists
     os.makedirs('tuning_results', exist_ok=True)
-    
-    # Remove old pickle result if it exists to prevent loading stale data later
     results_path = 'tuning_results/completed_studies.pkl'
     if os.path.exists(results_path):
         os.remove(results_path)
-        print(f"  -> Deleted old results file: {results_path}")
 
     print("\n" + "="*60)
     print(" STARTING TERMINAL OPTIMIZATION ENGINE")
     print("="*60 + "\n")
 
-    # --- 1. EXECUTION ---
-    # This runs the parallelized studies using all cores
-    studies = run_all_optimizations(['ph', 'temp', 'combined'])
-    
-    # --- 2. STORAGE ---
-    # Save the final dictionary for Jupyter retrieval
-    joblib.dump(studies, results_path)
+    # --- 1. EXECUTION & PROGRESSIVE SAVING ---
+    # We pass the results_path into the function so it can save incrementally
+    run_all_optimizations(['ph', 'temp', 'combined'], save_path=results_path)
     
     print("\n" + "="*60)
-    print(f" SUCCESS: Optimization complete.")
-    print(f" Results stored in: {results_path}")
+    print(" SUCCESS: Entire Optimization complete.")
     print(" You can now switch to your Jupyter Notebook to visualize.")
     print("="*60)
