@@ -1,6 +1,8 @@
 from diseases import DiseaseSimulator
 from drift_detection import AnomalyDetector
 from plots import AnomalyVisualizer
+import numpy as np
+import pandas as pd
 
 class ClinicalTrialRunner:
     """
@@ -158,3 +160,164 @@ class ClinicalTrialRunner:
             target_zones=target_zones,
             title=f"{title_prefix}"
         )
+
+class FinalPerformanceEvaluator:
+    """
+    Calculates clinical metrics. Distinguishes between Patient-Level accuracy 
+    (did the alarm ring?) and Zone-Level accuracy (did we map the disease perfectly?).
+    """
+    def __init__(self, total_zones=20):
+        self.total_zones = total_zones
+
+    def evaluate_test_suite(self, results_list, stream_name):
+        # Patient-Level
+        patient_tp, patient_fp, patient_fn = 0, 0, 0
+        # Zone-Level
+        zone_tp, zone_fp, zone_fn = 0, 0, 0
+        npl_list = []
+
+        for res in results_list:
+            target_zones = res['Target_Zones']
+            t_start = res['True_t_start']
+            t_peak = res['True_t_peak']
+            det_times = res['Detection_Times']  
+
+            # --- 1. HEALTHY PATIENT SCENARIO ---
+            if not target_zones or target_zones == [-1]:  
+                if len(det_times) > 0:
+                    patient_fp += 1
+                    zone_fp += len(det_times)
+                continue
+
+            # --- 2. DISEASED PATIENT SCENARIO ---
+            progression_window = t_peak - t_start
+            patient_alarm_rung = False
+            
+            # Check target zones (Did we catch the actual disease?)
+            for tz in target_zones:
+                if tz in det_times:
+                    raw_det = det_times[tz]
+                    t_det = min([t for t in raw_det.values() if t is not None]) if isinstance(raw_det, dict) else raw_det
+                    
+                    if t_det >= t_start:
+                        zone_tp += 1
+                        patient_alarm_rung = True
+                        npl_list.append(min(1.0, (t_det - t_start) / progression_window))
+                    else:
+                        zone_fp += 1 # Flagged before the disease even started
+                        zone_fn += 1 
+                else:
+                    zone_fn += 1 # Missed this specific zone
+
+            # Did the patient survive? (At least one target zone triggered an alert)
+            if patient_alarm_rung:
+                patient_tp += 1
+            else:
+                patient_fn += 1
+
+            # Check for spatial leakage (Flagged zones that weren't diseased)
+            spatial_fps = len([z for z in det_times.keys() if z not in target_zones])
+            zone_fp += spatial_fps
+            if spatial_fps > 0 and not patient_alarm_rung:
+                patient_fp += 1 # The alarm rang, but for the completely wrong body part
+
+        # --- Calculate Clinical Metrics ---
+        patient_recall = patient_tp / (patient_tp + patient_fn) if (patient_tp + patient_fn) > 0 else 0.0
+        zone_recall = zone_tp / (zone_tp + zone_fn) if (zone_tp + zone_fn) > 0 else 0.0
+        zone_precision = zone_tp / (zone_tp + zone_fp) if (zone_tp + zone_fp) > 0 else 0.0
+        mean_npl = np.mean(npl_list) if npl_list else 1.0
+
+        print(f"\n{'='*50}")
+        print(f" {stream_name} - FINAL CLINICAL REPORT")
+        print(f"{'='*50}")
+        print(f" TOTAL PATIENTS: {len(results_list)} (15 Diseased, 15 Healthy)")
+        print(f" -> Patient-Level Sensitivity (Lives Saved): {patient_recall * 100:.1f}%")
+        print(f"    (Patient TPs: {patient_tp}, Misses: {patient_fn}, False Alarms: {patient_fp})")
+        print("-" * 50)
+        print(f" -> Zone-Level Sensitivity (Mapping Acc):    {zone_recall * 100:.1f}%")
+        print(f" -> Zone-Level Precision (Trust factor):     {zone_precision * 100:.1f}%")
+        print(f"    (Zone TPs: {zone_tp}, Misses: {zone_fn}, False Alarms: {zone_fp})")
+        print("-" * 50)
+        print(f" Mean Detection Speed: {mean_npl * 100:.1f}% of Disease Peak")
+        print(f"{'='*50}")
+
+
+class ComprehensiveTestSuite:
+    """Executes the final benchmark on the new Test Dataset."""
+    def __init__(self, optimized_params, alpha=0.3, beta=0.10):
+        self.alpha = alpha
+        self.beta = beta
+        self.params = optimized_params
+        
+        # NOTE: Make sure your DiseaseSimulator is loading the NEW test trace dataset here!
+        self.simulator = DiseaseSimulator() 
+        self.evaluator = FinalPerformanceEvaluator()
+
+    def run_full_suite(self):
+        print("Starting Full Test Suite...")
+        diseases = list(self.simulator.diseases.keys())
+        
+        results_raw = []
+        results_agg = []
+
+        # 1. RUN ALL 15 DISEASES
+        for d_key in diseases:
+            d_info = self.simulator.diseases[d_key]
+            
+            if d_info['type'] == 'single':
+                raw_df, agg_df, t_start = self.simulator.run_single_disease(
+                    alpha=self.alpha, beta=self.beta, disease_key=d_key, target_confidence=70.0
+                )
+                detector = AnomalyDetector(
+                    alpha=self.alpha, beta=self.beta,
+                    raw_drift_threshold=self.params[f"{d_info['param']}_raw_drift"],
+                    agg_persistence=self.params[f"{d_info['param']}_agg_pers"],
+                    agg_abs_drift=self.params[f"{d_info['param']}_agg_drift"]
+                )
+            else: # combined
+                raw_df, agg_df, t_start = self.simulator.run_combined_disease(
+                    alpha=self.alpha, beta=self.beta, disease_key=d_key, target_confidence=70.0
+                )
+                detector = AnomalyDetector(
+                    alpha=self.alpha, beta=self.beta, beta_ph=0.10, beta_temp=0.01,
+                    raw_drift_ph=self.params['comb_raw_drift_ph'],
+                    raw_drift_temp=self.params['comb_raw_drift_temp'],
+                    agg_persistence=self.params['comb_agg_pers'],
+                    agg_abs_drift_ph=self.params['comb_agg_drift_ph'],
+                    agg_abs_drift_temp=self.params['comb_agg_drift_temp']
+                )
+
+            if d_info['type'] == 'combined':
+                _, det_raw = detector.detect_combined_raw_stream(raw_df) 
+                _, det_agg = detector.detect_combined_aggregated_stream(agg_df)
+            else:
+                _, det_raw = detector.detect_raw_stream(raw_df)
+                _, det_agg = detector.detect_aggregated_stream(agg_df)
+
+            res_base = {'Target_Zones': d_info['zones'], 'True_t_start': t_start, 'True_t_peak': t_start + d_info['progression_time']}
+            results_raw.append({**res_base, 'Detection_Times': det_raw})
+            results_agg.append({**res_base, 'Detection_Times': det_agg})
+
+        # 2. RUN 15 HEALTHY BASELINES
+        for _ in range(15):
+            # Using systemic_fever just as a dummy to get healthy data (passing safe_start way out of bounds)
+            raw_df, agg_df, t_start = self.simulator.run_single_disease(
+                alpha=self.alpha, beta=self.beta, disease_key='systemic_fever_temp', safe_start_time=86400
+            )
+            # Use the most sensitive detector (pH) to test healthy resilience
+            detector = AnomalyDetector(
+                alpha=self.alpha, beta=self.beta,
+                raw_drift_threshold=self.params['ph_raw_drift'],
+                agg_persistence=self.params['ph_agg_pers'],
+                agg_abs_drift=self.params['ph_agg_drift']
+            )
+            _, det_raw = detector.detect_raw_stream(raw_df)
+            _, det_agg = detector.detect_aggregated_stream(agg_df)
+
+            res_base = {'Target_Zones': [-1], 'True_t_start': 999999, 'True_t_peak': 999999}
+            results_raw.append({**res_base, 'Detection_Times': det_raw})
+            results_agg.append({**res_base, 'Detection_Times': det_agg})
+
+        # 3. EVALUATE
+        self.evaluator.evaluate_test_suite(results_raw, "RAW STREAM")
+        self.evaluator.evaluate_test_suite(results_agg, "AGGREGATED STREAM")

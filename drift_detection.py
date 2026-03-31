@@ -11,7 +11,8 @@ class RawStreamKalman:
     It uses a Cumulative Sum (CUSUM) approach to detect sustained drift,
     making it resilient to isolated, extreme outliers caused by sensing errors.
     """
-    def __init__(self, alpha, beta, initial_val, q_process=1e-5, drift_threshold=2.5):
+    # ---> NEW: Added 'leakage' to the init arguments <---
+    def __init__(self, alpha, beta, initial_val, q_process=1e-5, drift_threshold=2.5, leakage=0.98):
         """
         Args:
             alpha (float): Probability of localization error.
@@ -19,11 +20,13 @@ class RawStreamKalman:
             initial_val (float): The starting baseline value.
             q_process (float): Process noise variance (how much we trust the model vs data).
             drift_threshold (float): The threshold for the cumulative residual to flag an anomaly.
+            leakage (float): How much memory of previous errors to retain (0.0 to 1.0).
         """
         # Measurement uncertainty (R) combines sensor error and location mismatch
         self.r = (beta**2) + (alpha**2)
         self.q = q_process
         self.drift_threshold = drift_threshold
+        self.leakage = leakage  # ---> NEW: Store it
         
         # Store state variables for multiple zones independently
         self.zones = {}
@@ -52,7 +55,8 @@ class RawStreamKalman:
         z['p'] = (1 - k_gain) * z['p']                 # Update uncertainty
 
         # 3. DRIFT DETECTION: Accumulate sustained errors with a leakage factor to prevent over-sensitivity to constant noise
-        z['cum_res'] = (z['cum_res'] + residual) * 0.98
+        # ---> NEW: Use self.leakage instead of the hardcoded 0.98 <---
+        z['cum_res'] = (z['cum_res'] + residual) * self.leakage
         is_drift = abs(z['cum_res']) > self.drift_threshold
         
         if is_drift:
@@ -149,10 +153,11 @@ class AnomalyDetector:
     Processes all zones independently, maintaining separate baselines and Kalman 
     filters for each anatomical region. Returns a dictionary of triggering zones.
     """
+    # ---> NEW: Added raw_leakage parameter to the router <---
     def __init__(self, alpha=0.05, beta=0.1, target_confidence=70.0, 
                  raw_drift_threshold=2.5, raw_drift_ph=1.5, raw_drift_temp=3.5, 
                  agg_persistence=3, agg_abs_drift=0.05, agg_abs_drift_ph=0.10, agg_abs_drift_temp=0.5,
-                 beta_ph=None, beta_temp=None): # <-- Added specific betas
+                 beta_ph=None, beta_temp=None, raw_leakage=0.98): 
         
         self.alpha = alpha
         self.beta = beta # Used for single streams and Binomial Confidence
@@ -166,6 +171,7 @@ class AnomalyDetector:
         self.raw_drift_threshold = raw_drift_threshold
         self.raw_drift_ph = raw_drift_ph
         self.raw_drift_temp = raw_drift_temp
+        self.raw_leakage = raw_leakage  # ---> NEW: Store it
         
         self.agg_persistence = agg_persistence
         self.agg_abs_drift = agg_abs_drift
@@ -204,7 +210,8 @@ class AnomalyDetector:
                     buffer.append(val)
                     if StatsUtils.obtain_confidence_binomial(self.alpha, self.beta, len(buffer)) >= self.target_confidence:
                         dynamic_baseline = np.median(buffer)
-                        kf = RawStreamKalman(alpha=self.alpha, beta=self.beta, initial_val=dynamic_baseline, drift_threshold=self.raw_drift_threshold)
+                        # ---> NEW: Pass the leakage to the Kalman filter <---
+                        kf = RawStreamKalman(alpha=self.alpha, beta=self.beta, initial_val=dynamic_baseline, drift_threshold=self.raw_drift_threshold, leakage=self.raw_leakage)
                         baseline_established = True
                         z_filt[:i+1] = dynamic_baseline # Backfill calibration phase
                 else:
@@ -305,9 +312,9 @@ class AnomalyDetector:
                     buf_temp.append(v_temp)
                     # Notice we still use self.beta (the highest one) to compute the combined binomial confidence
                     if StatsUtils.obtain_confidence_binomial(self.alpha, self.beta, len(buf_ph)) >= self.target_confidence:
-                        # Here we use the specific betas!
-                        kf_ph = RawStreamKalman(alpha=self.alpha, beta=self.beta_ph, initial_val=np.median(buf_ph), drift_threshold=self.raw_drift_ph)
-                        kf_temp = RawStreamKalman(alpha=self.alpha, beta=self.beta_temp, initial_val=np.median(buf_temp), drift_threshold=self.raw_drift_temp)
+                        # ---> NEW: Pass the leakage to the Kalman filters <---
+                        kf_ph = RawStreamKalman(alpha=self.alpha, beta=self.beta_ph, initial_val=np.median(buf_ph), drift_threshold=self.raw_drift_ph, leakage=self.raw_leakage)
+                        kf_temp = RawStreamKalman(alpha=self.alpha, beta=self.beta_temp, initial_val=np.median(buf_temp), drift_threshold=self.raw_drift_temp, leakage=self.raw_leakage)
                         baseline_established = True
                         out_ph[:i+1] = np.median(buf_ph)
                         out_temp[:i+1] = np.median(buf_temp)

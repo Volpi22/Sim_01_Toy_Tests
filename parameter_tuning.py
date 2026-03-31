@@ -115,24 +115,37 @@ class FilterOptimizer:
         """1D/2D Optimization for the Raw Stream Kalman Filter."""
         print(f"  [Worker {os.getpid()}] Starting Trial {trial.number}...")
 
+        # ---> TUNING THE LEAKAGE FACTOR <---
+        leakage = trial.suggest_float("raw_leakage", 0.85, 0.99)
+
         if self.param_type == 'ph':
             thresh = trial.suggest_float("raw_drift_threshold", 0.01, 2.0, step=0.05)
-            detector = AnomalyDetector(alpha=self.alpha, beta=self.current_beta, raw_drift_threshold=thresh)
+            detector = AnomalyDetector(
+                alpha=self.alpha, 
+                beta=self.current_beta, 
+                raw_drift_threshold=thresh,
+                raw_leakage=leakage
+            )
         elif self.param_type == 'temp':
             thresh = trial.suggest_float("raw_drift_threshold", 0.5, 5.0, step=0.1)
-            detector = AnomalyDetector(alpha=self.alpha, beta=self.current_beta, raw_drift_threshold=thresh)
+            detector = AnomalyDetector(
+                alpha=self.alpha, 
+                beta=self.current_beta, 
+                raw_drift_threshold=thresh,
+                raw_leakage=leakage
+            )
         elif self.param_type == 'combined':
             thresh_ph = trial.suggest_float("raw_drift_ph", 0.01, 2.0, step=0.05)
             thresh_temp = trial.suggest_float("raw_drift_temp", 0.5, 5.0, step=0.1)
             
-            # ---> UPDATED: Passing the specific betas for the combined raw stream! <---
             detector = AnomalyDetector(
                 alpha=self.alpha, 
                 beta=self.current_beta, 
                 beta_ph=self.beta_map['ph'], 
                 beta_temp=self.beta_map['temp'],
                 raw_drift_ph=thresh_ph, 
-                raw_drift_temp=thresh_temp
+                raw_drift_temp=thresh_temp,
+                raw_leakage=leakage
             )
 
         results = []
@@ -169,7 +182,6 @@ class FilterOptimizer:
             drift_ph = trial.suggest_float("agg_abs_drift_ph", 0.01, 0.20, step=0.01)
             drift_temp = trial.suggest_float("agg_abs_drift_temp", 0.1, 1.5, step=0.1)
             
-            # ---> UPDATED: Passing the specific betas for the combined agg stream! <---
             detector = AnomalyDetector(
                 alpha=self.alpha, 
                 beta=self.current_beta, 
