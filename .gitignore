@@ -8,4 +8,4 @@ position_data.csv
 optuna_study_ph.db
 optuna_study_temp.db
 optuna_study_combined.db
-
+optimization.log

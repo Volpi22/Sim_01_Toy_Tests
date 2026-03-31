@@ -230,6 +230,10 @@ class SimulationVisualizer:
 # ANOMALY DETECTION VISUALIZER
 # ==========================================
 
+# ==========================================
+# ANOMALY DETECTION VISUALIZER
+# ==========================================
+
 class AnomalyVisualizer:
     """
     Handles plotting for the AnomalyDetector pipeline.
@@ -240,139 +244,127 @@ class AnomalyVisualizer:
     def __init__(self, style="seaborn-v0_8-muted"):
         self.style = style
 
-    def plot_single_raw(self, df, detection_time, title="Raw Stream Anomaly Detection"):
-        """Plots a single panel showing raw pings vs the CUSUM Kalman state."""
-        with plt.style.context(self.style):
-            plt.figure(figsize=(10, 5))
-            
-            # Plot the highly noisy raw data points faintly in the background
-            plt.scatter(df['Time_Seconds'], df['Value'], alpha=0.3, color='gray', s=10, label='Raw Readings')
-            # Plot the smoothed Kalman filter state
-            plt.plot(df['Time_Seconds'], df['Filtered_Value'], color='#1f77b4', linewidth=2, label='Kalman State')
-            
-            # If an anomaly was detected, draw a red vertical line at that exact second
-            if detection_time:
-                plt.axvline(x=detection_time, color='#d62728', linestyle='--', linewidth=2, 
-                            label=f'Anomaly Detected: Hour {detection_time/3600:.2f}')
-            
-            plt.title(title, fontweight='bold')
-            plt.xlabel('Time (Seconds)', fontsize=12)
-            plt.ylabel('Sensor Value', fontsize=12)
-            plt.legend()
-            plt.grid(True, linestyle='--', alpha=0.6)
-            plt.tight_layout()
-            plt.show()
-
-    def plot_single_aggregated(self, df, detection_time, title="Aggregated Stream Anomaly Detection"):
-        """Plots a single panel showing aggregated packets vs the Adaptive Kalman state."""
-        with plt.style.context(self.style):
-            plt.figure(figsize=(10, 5))
-            
-            # Plot aggregated medians as squares
-            plt.scatter(df['Time_Seconds_End'], df['Median_Val'], alpha=0.7, color='#ff7f0e', marker='s', label='Aggregated Median')
-            # Plot the adaptive Kalman state tracking the medians
-            plt.plot(df['Time_Seconds_End'], df['Filtered_Value'], color='#2ca02c', linewidth=2, label='Adaptive Kalman State')
-            
-            if detection_time:
-                plt.axvline(x=detection_time, color='#d62728', linestyle='--', linewidth=2, 
-                            label=f'Anomaly Detected: Hour {detection_time/3600:.2f}')
-            
-            plt.title(title, fontweight='bold')
-            plt.xlabel('Time (Seconds)', fontsize=12)
-            plt.ylabel('Aggregated Median Value', fontsize=12)
-            plt.legend()
-            plt.grid(True, linestyle='--', alpha=0.6)
-            plt.tight_layout()
-            plt.show()
-
-    def plot_comparison(self, raw_df, agg_df, det_raw, det_agg, title="Detection Time Comparison"):
+    def plot_comparison(self, raw_df, agg_df, det_raw, det_agg, target_zones, title="Detection Time Comparison"):
         """
-        Creates a 2x1 stacked plot to compare the speed and stability of 
-        Raw stream detection vs. Aggregated stream detection.
+        Creates a dynamic grid to compare Raw vs. Aggregated detection.
+        Plots every target zone PLUS any zone that triggered a False Positive.
         """
+        # Create copies and convert time to hours for clean X-axis scaling
+        r_df = raw_df.copy()
+        a_df = agg_df.copy()
+        r_df['Time_Hours'] = r_df['Time_Seconds'] / 3600
+        a_df['Time_Hours'] = a_df['Time_Seconds_End'] / 3600
+
+        # Find all unique zones we need to plot (Targets + Any False Alarms)
+        zones_to_plot = sorted(list(set(target_zones) | set(det_raw.keys()) | set(det_agg.keys())))
+        nrows = len(zones_to_plot)
+
         with plt.style.context(self.style):
-            fig, ax = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
+            # 2 Columns: Col 0 = Raw, Col 1 = Agg
+            # squeeze=False ensures axes is always a 2D array even if nrows=1
+            fig, axes = plt.subplots(nrows, 2, figsize=(14, 4 * nrows), sharex=True, squeeze=False)
 
-            # --- TOP PANEL: RAW STREAM ---
-            ax[0].scatter(raw_df['Time_Seconds'], raw_df['Value'], alpha=0.2, color='gray', s=10, label='Raw Readings')
-            ax[0].plot(raw_df['Time_Seconds'], raw_df['Filtered_Value'], color='#1f77b4', linewidth=2, label='Kalman State')
-            if det_raw:
-                ax[0].axvline(x=det_raw, color='#d62728', linestyle='--', linewidth=2, label=f'Raw Detection: Hour {det_raw/3600:.2f}')
-            ax[0].set_title("Raw Stream Detection", fontweight='bold')
-            ax[0].legend(loc='upper left')
-            ax[0].grid(True, linestyle='--', alpha=0.6)
+            for i, zone in enumerate(zones_to_plot):
+                is_target = zone in target_zones
+                zone_label = f"Zone {zone} (TARGET)" if is_target else f"Zone {zone} (FALSE ALARM)"
+                
+                # --- LEFT COLUMN: RAW STREAM ---
+                ax_raw = axes[i, 0]
+                z_raw = r_df[r_df['Zone'] == zone]
+                
+                ax_raw.scatter(z_raw['Time_Hours'], z_raw['Value'], alpha=0.2, color='gray', s=10, label='Raw Readings')
+                ax_raw.plot(z_raw['Time_Hours'], z_raw['Filtered_Value'], color='#1f77b4', linewidth=2, label='Kalman State')
+                
+                if zone in det_raw:
+                    t_det = det_raw[zone] / 3600
+                    ax_raw.axvline(x=t_det, color='#d62728', linestyle='--', linewidth=2, label=f'Alert: {t_det:.2f}h')
+                
+                ax_raw.set_title(f"RAW - {zone_label}", fontweight='bold', color='black' if is_target else '#d62728')
+                ax_raw.grid(True, linestyle='--', alpha=0.6)
+                ax_raw.legend(loc='upper left')
 
-            # --- BOTTOM PANEL: AGGREGATED STREAM ---
-            ax[1].scatter(agg_df['Time_Seconds_End'], agg_df['Median_Val'], alpha=0.8, color='#ff7f0e', marker='s', label='Agg Median')
-            ax[1].plot(agg_df['Time_Seconds_End'], agg_df['Filtered_Value'], color='#2ca02c', linewidth=2, label='Adaptive State')
-            if det_agg:
-                ax[1].axvline(x=det_agg, color='#d62728', linestyle='--', linewidth=2, label=f'Agg Detection: Hour {det_agg/3600:.2f}')
-            ax[1].set_title("Aggregated Stream Detection", fontweight='bold')
-            ax[1].legend(loc='upper left')
-            ax[1].grid(True, linestyle='--', alpha=0.6)
+                # --- RIGHT COLUMN: AGGREGATED STREAM ---
+                ax_agg = axes[i, 1]
+                z_agg = a_df[a_df['Zone'] == zone]
+                
+                ax_agg.scatter(z_agg['Time_Hours'], z_agg['Median_Val'], alpha=0.8, color='#ff7f0e', marker='s', label='Agg Median')
+                ax_agg.plot(z_agg['Time_Hours'], z_agg['Filtered_Value'], color='#2ca02c', linewidth=2, label='Adaptive State')
+                
+                if zone in det_agg:
+                    t_det = det_agg[zone] / 3600
+                    ax_agg.axvline(x=t_det, color='#d62728', linestyle='--', linewidth=2, label=f'Alert: {t_det:.2f}h')
+                
+                ax_agg.set_title(f"AGGREGATED - {zone_label}", fontweight='bold', color='black' if is_target else '#d62728')
+                ax_agg.grid(True, linestyle='--', alpha=0.6)
+                ax_agg.legend(loc='upper left')
 
-            # Format the X-axis to display Hours instead of seconds
-            ticks = ax[1].get_xticks()
-            ax[1].set_xticks(ticks) # Lock the tick positions
-            ax[1].set_xticklabels([f"{t/3600:.1f}h" for t in ticks]) # Apply formatted labels
-
-            fig.supxlabel('Time Progression (Hours)', fontsize=12)
-            fig.supylabel('Sensor Value', fontsize=12)
-            fig.suptitle(title, fontsize=14, fontweight='bold')
+            fig.supxlabel('Time Progression (Hours)', fontsize=14, fontweight='bold')
+            fig.supylabel('Sensor Value', fontsize=14, fontweight='bold')
+            fig.suptitle(title, fontsize=16, fontweight='bold')
             plt.tight_layout()
             plt.show()
             
-    def plot_combined_comparison(self, raw_df, agg_df, det_raw, det_agg, title="Combined Detection Comparison"):
+    def plot_combined_comparison(self, raw_df, agg_df, det_raw, det_agg, target_zones, title="Combined Detection Comparison"):
         """
-        Creates a 2x2 grid to compare Raw vs Aggregated detection for a dual-parameter 
-        disease (pH and Temperature simultaneously).
+        Creates a dynamic 4-column grid for dual-parameter diseases.
+        Cols: [Raw pH] | [Raw Temp] | [Agg pH] | [Agg Temp]
         """
+        r_df = raw_df.copy()
+        a_df = agg_df.copy()
+        r_df['Time_Hours'] = r_df['Time_Seconds'] / 3600
+        a_df['Time_Hours'] = a_df['Time_Seconds_End'] / 3600
+
+        zones_to_plot = sorted(list(set(target_zones) | set(det_raw.keys()) | set(det_agg.keys())))
+        nrows = len(zones_to_plot)
+
         with plt.style.context(self.style):
-            fig, ax = plt.subplots(2, 2, figsize=(14, 8), sharex=True)
+            # 4 Columns for combined plots
+            fig, axes = plt.subplots(nrows, 4, figsize=(20, 4 * nrows), sharex=True, squeeze=False)
 
-            # ========================================
-            # ROW 0: RAW STREAM
-            # ========================================
-            
-            # Top-Left: Raw pH
-            ax[0, 0].scatter(raw_df['Time_Seconds'], raw_df['Value_pH'], alpha=0.2, color='gray', s=10)
-            ax[0, 0].plot(raw_df['Time_Seconds'], raw_df['Filtered_pH'], color='#1f77b4', linewidth=2)
-            if det_raw['ph']: ax[0, 0].axvline(x=det_raw['ph'], color='#d62728', linestyle='--')
-            ax[0, 0].set_title("Raw Stream: pH", fontweight='bold')
-            ax[0, 0].grid(True, linestyle='--', alpha=0.6)
+            for i, zone in enumerate(zones_to_plot):
+                is_target = zone in target_zones
+                z_label = f"Z{zone} (TARGET)" if is_target else f"Z{zone} (FALSE ALARM)"
+                
+                z_raw = r_df[r_df['Zone'] == zone]
+                z_agg = a_df[a_df['Zone'] == zone]
+                
+                # --- Col 0: Raw pH ---
+                ax = axes[i, 0]
+                ax.scatter(z_raw['Time_Hours'], z_raw['Value_pH'], alpha=0.2, color='gray', s=10)
+                ax.plot(z_raw['Time_Hours'], z_raw['Filtered_pH'], color='#1f77b4', linewidth=2)
+                if zone in det_raw and det_raw[zone].get('ph'):
+                    ax.axvline(x=det_raw[zone]['ph']/3600, color='#d62728', linestyle='--')
+                ax.set_title(f"RAW pH - {z_label}", fontweight='bold', color='black' if is_target else '#d62728')
+                ax.grid(True, linestyle='--', alpha=0.6)
 
-            # Top-Right: Raw Temperature
-            ax[0, 1].scatter(raw_df['Time_Seconds'], raw_df['Value_Temp'], alpha=0.2, color='gray', s=10)
-            ax[0, 1].plot(raw_df['Time_Seconds'], raw_df['Filtered_Temp'], color='#9467bd', linewidth=2)
-            if det_raw['temp']: ax[0, 1].axvline(x=det_raw['temp'], color='#d62728', linestyle='--')
-            ax[0, 1].set_title("Raw Stream: Temperature", fontweight='bold')
-            ax[0, 1].grid(True, linestyle='--', alpha=0.6)
+                # --- Col 1: Raw Temp ---
+                ax = axes[i, 1]
+                ax.scatter(z_raw['Time_Hours'], z_raw['Value_Temp'], alpha=0.2, color='gray', s=10)
+                ax.plot(z_raw['Time_Hours'], z_raw['Filtered_Temp'], color='#9467bd', linewidth=2)
+                if zone in det_raw and det_raw[zone].get('temp'):
+                    ax.axvline(x=det_raw[zone]['temp']/3600, color='#d62728', linestyle='--')
+                ax.set_title(f"RAW Temp - {z_label}", fontweight='bold', color='black' if is_target else '#d62728')
+                ax.grid(True, linestyle='--', alpha=0.6)
 
-            # ========================================
-            # ROW 1: AGGREGATED STREAM
-            # ========================================
-            
-            # Bottom-Left: Aggregated pH
-            ax[1, 0].scatter(agg_df['Time_Seconds_End'], agg_df['Median_pH'], alpha=0.8, color='#ff7f0e', marker='s')
-            ax[1, 0].plot(agg_df['Time_Seconds_End'], agg_df['Filtered_pH'], color='#2ca02c', linewidth=2)
-            if det_agg['ph']: ax[1, 0].axvline(x=det_agg['ph'], color='#d62728', linestyle='--')
-            ax[1, 0].set_title("Aggregated Stream: pH", fontweight='bold')
-            ax[1, 0].grid(True, linestyle='--', alpha=0.6)
+                # --- Col 2: Aggregated pH ---
+                ax = axes[i, 2]
+                ax.scatter(z_agg['Time_Hours'], z_agg['Median_pH'], alpha=0.8, color='#ff7f0e', marker='s')
+                ax.plot(z_agg['Time_Hours'], z_agg['Filtered_pH'], color='#2ca02c', linewidth=2)
+                if zone in det_agg and det_agg[zone].get('ph'):
+                    ax.axvline(x=det_agg[zone]['ph']/3600, color='#d62728', linestyle='--')
+                ax.set_title(f"AGG pH - {z_label}", fontweight='bold', color='black' if is_target else '#d62728')
+                ax.grid(True, linestyle='--', alpha=0.6)
 
-            # Bottom-Right: Aggregated Temperature
-            ax[1, 1].scatter(agg_df['Time_Seconds_End'], agg_df['Median_Temp'], alpha=0.8, color='#ff7f0e', marker='s')
-            ax[1, 1].plot(agg_df['Time_Seconds_End'], agg_df['Filtered_Temp'], color='#8c564b', linewidth=2)
-            if det_agg['temp']: ax[1, 1].axvline(x=det_agg['temp'], color='#d62728', linestyle='--')
-            ax[1, 1].set_title("Aggregated Stream: Temperature", fontweight='bold')
-            ax[1, 1].grid(True, linestyle='--', alpha=0.6)
+                # --- Col 3: Aggregated Temp ---
+                ax = axes[i, 3]
+                ax.scatter(z_agg['Time_Hours'], z_agg['Median_Temp'], alpha=0.8, color='#ff7f0e', marker='s')
+                ax.plot(z_agg['Time_Hours'], z_agg['Filtered_Temp'], color='#8c564b', linewidth=2)
+                if zone in det_agg and det_agg[zone].get('temp'):
+                    ax.axvline(x=det_agg[zone]['temp']/3600, color='#d62728', linestyle='--')
+                ax.set_title(f"AGG Temp - {z_label}", fontweight='bold', color='black' if is_target else '#d62728')
+                ax.grid(True, linestyle='--', alpha=0.6)
 
-            # Format the X-axis for the bottom row to display Hours
-            ticks = ax[1, 0].get_xticks()
-            for col in range(2):
-                ax[1, col].set_xticks(ticks) # Lock positions to prevent warnings
-                ax[1, col].set_xticklabels([f"{t/3600:.1f}h" for t in ticks]) # Set Hour labels
-
-            fig.supxlabel('Time Progression (Hours)', fontsize=12)
-            fig.suptitle(title, fontsize=14, fontweight='bold')
+            fig.supxlabel('Time Progression (Hours)', fontsize=14, fontweight='bold')
+            fig.suptitle(title, fontsize=16, fontweight='bold')
             plt.tight_layout()
             plt.show()
