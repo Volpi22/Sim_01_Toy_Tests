@@ -171,7 +171,7 @@ class AnomalyDetector:
         self.raw_drift_threshold = raw_drift_threshold
         self.raw_drift_ph = raw_drift_ph
         self.raw_drift_temp = raw_drift_temp
-        self.raw_leakage = raw_leakage  # ---> NEW: Store it
+        self.raw_leakage = raw_leakage
         
         self.agg_persistence = agg_persistence
         self.agg_abs_drift = agg_abs_drift

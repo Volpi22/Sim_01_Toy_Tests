@@ -271,6 +271,7 @@ class ComprehensiveTestSuite:
                 detector = AnomalyDetector(
                     alpha=self.alpha, beta=self.beta,
                     raw_drift_threshold=self.params[f"{d_info['param']}_raw_drift"],
+                    raw_leakage=self.params[f"{d_info['param']}_raw_leakage"],
                     agg_persistence=self.params[f"{d_info['param']}_agg_pers"],
                     agg_abs_drift=self.params[f"{d_info['param']}_agg_drift"]
                 )
@@ -282,6 +283,7 @@ class ComprehensiveTestSuite:
                     alpha=self.alpha, beta=self.beta, beta_ph=0.10, beta_temp=0.01,
                     raw_drift_ph=self.params['comb_raw_drift_ph'],
                     raw_drift_temp=self.params['comb_raw_drift_temp'],
+                    raw_leakage=self.params['comb_raw_leakage'],
                     agg_persistence=self.params['comb_agg_pers'],
                     agg_abs_drift_ph=self.params['comb_agg_drift_ph'],
                     agg_abs_drift_temp=self.params['comb_agg_drift_temp']
@@ -308,6 +310,7 @@ class ComprehensiveTestSuite:
             detector = AnomalyDetector(
                 alpha=self.alpha, beta=self.beta,
                 raw_drift_threshold=self.params['ph_raw_drift'],
+                raw_leakage=self.params['ph_raw_leakage'],
                 agg_persistence=self.params['ph_agg_pers'],
                 agg_abs_drift=self.params['ph_agg_drift']
             )
