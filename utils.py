@@ -1,3 +1,14 @@
+"""
+Core Utilities Module
+
+This module provides foundational support classes for the nanonetwork simulation:
+1. DataManager: A repository for anatomical mapping and physiological ground-truth data.
+2. ProcessorUtils: Helper functions for dataset manipulation and stochastic sampling.
+3. StatsUtils: Statistical engines for calculating Binomial and Hoeffding confidence bounds.
+4. EnergyModel: A physics-based model of a piezoelectric energy harvesting nanobot, 
+   tracking capacitor charging cycles and hardware power expenditures.
+"""
+
 import pandas as pd
 import numpy as np
 import random
@@ -11,8 +22,8 @@ from scipy.stats import binom
 class DataManager:
     """
     Centralized storage for anatomical mappings and physiological ground-truth ranges.
-    Maps localized 'Zones' to specific 'Vessel_IDs' and provides reference values 
-    for physical parameters across the body.
+    Maps localized 'Zones' to specific micro-vascular 'Vessel_IDs' and provides reference 
+    min/max boundary values for physical parameters across the entire body.
     """
     
     # Anatomical zone mapping (Zone ID -> List of Vessel IDs)
@@ -28,7 +39,8 @@ class DataManager:
     }
 
     def __init__(self):
-        # Physiological baseline ranges [Min, Max] per Vessel ID
+        """Initializes the baseline physiological dictionaries."""
+        # Physiological baseline ranges [Min, Max] per specific Vessel ID
         self.datasets = {
             'press': {
                 # Pressure in mmHg
@@ -120,17 +132,32 @@ class DataManager:
         }
 
     def get_data_dict(self, param_key: str) -> dict:
-        """Retrieves the expected bounds dictionary for a given parameter."""
+        """
+        Retrieves the expected bounds dictionary for a given physical parameter.
+        
+        @param param_key (str): The string identifier for the parameter (e.g., 'ph').
+        @return dict: The dictionary mapping vessel IDs to [min, max] ranges.
+        """
         return self.datasets.get(param_key.lower())
 
     def get_decimal_precision(self, param_type: str) -> int:
-        """Returns the appropriate number of decimal places for data rounding."""
+        """
+        Returns the appropriate number of decimal places for data rounding based on sensor type.
+        
+        @param param_type (str): The string identifier for the parameter.
+        @return int: The number of decimal places.
+        """
         precisions = {'so2': 0, 'ph': 2, 'temp': 3, 'press': 4}
         return precisions.get(param_type, 3)
 
     @staticmethod
     def assign_zone(vessel_id: int):
-        """Finds the anatomical zone containing a specific vessel."""
+        """
+        Iterates over the anatomical mapping to find the zone containing a specific vessel.
+        
+        @param vessel_id (int): The unique integer ID of the vessel.
+        @return int or None: The Zone ID, or None if the vessel is unmapped.
+        """
         for zone, vessels in DataManager.ZONE_TO_VESSELS.items():
             if vessel_id in vessels:
                 return zone
@@ -141,13 +168,17 @@ class DataManager:
 # ==========================================
 
 class ProcessorUtils:
-    """Helper methods for handling data structures and generating randomized data."""
+    """Helper methods for handling data structures and generating stochastic data."""
 
     @staticmethod
     def split_vessel_ids(row: pd.Series) -> pd.DataFrame:
         """
-        Splits lists of sequential vessel IDs when a nanobot passes through the heart (Vessel ID = 2).
-        This models separate circulatory 'laps' or cycles.
+        Splits lists of sequential vessel IDs when a nanobot passes through the heart 
+        (Vessel ID = 2). This operation allows the simulator to discretize a continuous 
+        trajectory into separate circulatory 'laps' or cycles.
+        
+        @param row (pd.Series): A single row containing a list of navigated 'Vessel_ID's.
+        @return pd.DataFrame: An expanded DataFrame with discrete circulatory segments.
         """
         vessel_ids = row['Vessel_ID']
         segments = []
@@ -155,7 +186,8 @@ class ProcessorUtils:
         
         for i, v_id in enumerate(vessel_ids):
             if v_id == 2:
-                # If we encounter the heart, end the current segment (unless it's the very start)
+                # If the heart (vessel 2) is encountered, close the current segment 
+                # (unless it is the very first vessel of the simulation)
                 if i == 0 or vessel_ids[i-1] != 2:
                     if current_segment: 
                         segments.append(current_segment)
@@ -176,13 +208,20 @@ class ProcessorUtils:
     @staticmethod
     def get_random_value(data_dict: dict, vessel_id: int, beta: float) -> float:
         """
-        Generates a random physical reading within the expected bounds of the vessel.
-        Uses `beta` to simulate a probability of sensing error (reading data from a random, incorrect vessel).
+        Generates a stochastic physical reading within the expected bounds of the vessel.
+        Utilizes `beta` to simulate a probability of measurement error (e.g., reading 
+        data bounds from a randomly selected, incorrect vessel).
+        
+        @param data_dict (dict): The dictionary mapping vessel bounds.
+        @param vessel_id (int): The actual vessel the nanobot is traversing.
+        @param beta (float): The probability (0.0 to 1.0) of a sensing error.
+        
+        @return float: The generated stochastic reading.
         """
         if vessel_id not in data_dict:
             chosen_id = random.choice(list(data_dict.keys()))
         elif random.random() < beta:
-            # Introduce error: sample from a different vessel
+            # Inject error: Sample from an incorrect vessel's bounds
             available_ids = list(data_dict.keys())
             available_ids.remove(vessel_id)
             chosen_id = random.choice(available_ids)
@@ -202,13 +241,21 @@ class StatsUtils:
     @staticmethod
     def obtain_confidence_binomial(alpha: float, beta: float, n: int) -> float:
         """
-        Calculates the probability of success using a Binomial Cumulative Distribution Function.
-        Adjusts the effective sample size to be even.
+        Calculates statistical confidence using a Binomial Cumulative Distribution Function.
         
-        The validity probability is derived as:
-        $$p_{valid} = 1 - (\alpha + \beta - \alpha\beta)$$
+        The baseline probability of a valid sample is derived as:
+        p_{valid} = 1 - (\alpha + \beta - \alpha\beta)
+        
+        @param alpha (float): Localization error probability.
+        @param beta (float): Sensing error probability.
+        @param n (int): The number of samples collected in the packet.
+        
+        @return float: The confidence percentage (0.0 to 100.0).
         """
-        if n <= 0: return 0.0
+        if n <= 0: 
+            return 0.0
+            
+        # Adjust sample size to force a strict majority threshold
         n_adj = n if n % 2 != 0 else n - 1
         
         p_valid = 1 - (alpha + beta - (alpha * beta))
@@ -220,13 +267,24 @@ class StatsUtils:
     @staticmethod
     def obtain_confidence_hoeffding(alpha: float, beta: float, n: int) -> float:
         """
-        Calculates a statistical confidence bound using Hoeffding's Inequality.
+        Calculates a statistical confidence bound utilizing Hoeffding's Inequality.
+        
+        @param alpha (float): Localization error probability.
+        @param beta (float): Sensing error probability.
+        @param n (int): The number of samples collected in the packet.
+        
+        @return float: The confidence percentage (0.0 to 100.0).
         """
-        if n <= 0: return 0.0
+        if n <= 0: 
+            return 0.0
+            
         n_adj = n if n % 2 != 0 else n - 1
         
         p_valid = 1 - (alpha + beta - (alpha * beta))
-        if p_valid <= 0.5: return 0.0
+        
+        # Hoeffding is unreliable/invalid if the underlying valid probability is worse than random
+        if p_valid <= 0.5: 
+            return 0.0
         
         t = p_valid - 0.5
         prob_failure_bound = math.exp(-2 * n_adj * (t ** 2))
@@ -239,38 +297,54 @@ class StatsUtils:
 class EnergyModel:
     """
     Simulates a piezoelectric/vibrational energy harvesting system for nanobots.
-    Calculates charging over time and energy expenditure per packet transmission.
+    Calculates non-linear capacitor charging over time and discrete energy expenditures 
+    per sensor activation and packet transmission.
     """
     def __init__(self, param_type='press', e_max=800e-12, e_off=40e-12):
-        # Hardware specs
+        """
+        Initializes the hardware constants and energy limits of the nanobot.
+        
+        @param param_type (str): The primary sensor modality determining power drain.
+        @param e_max (float): The maximum capacity of the storage capacitor (Joules).
+        @param e_off (float): The minimum operational threshold before brown-out (Joules).
+        """
+        # --- Hardware Specifications ---
         self.C_cap = 9e-9             # Capacitor rating (Farads)
         self.V_g = 0.42               # Generation voltage (Volts)
-        self.delta_Q = 6e-12          # Charge increment per cycle (Coulombs)
+        self.delta_Q = 6e-12          # Charge increment per vibration cycle (Coulombs)
         self.vibration_freq = 50      # Harvesting vibrations per second (Hz)
         
-        # Energy expenditures (Joules)
+        # --- Energy Expenditures (Joules) ---
         self.E_tx_pulse = 1e-12       # Transmission energy per bit 
         self.E_rx_pulse = 0.1e-12     # Reception energy per bit
         self.idle_drain_per_sec = 1e-12 
         self.header_bits = 32         
         
-        # Thresholds
-        self.E_max = e_max            # Max battery capacity
-        self.E_off = e_off            # Brown-out / turn-off threshold
+        # --- Power Thresholds ---
+        self.E_max = e_max            
+        self.E_off = e_off            
         
+        # Determine activation threshold dynamically based on the cost of the next action
         task_cost = self.action_consumption(param_type)
         self.E_on = self.E_off + task_cost + 0.1e-12
 
     def get_current_cycles(self, energy: float) -> float:
         """
-        Reverse-calculates how many charge cycles are required to reach the current energy state.
-        Derived from solving the energy equation for 'n' cycles.
+        Reverse-calculates the requisite number of charging cycles to reach a given energy state.
+        Derived by solving the capacitor energy equation for 'n' cycles.
+        
+        @param energy (float): The current energy state in Joules.
+        @return float: The equivalent number of vibration cycles. Returns infinity if fully charged.
         """
-        if energy >= self.E_max: return float('inf')
-        if energy <= 0: return 0
+        if energy >= self.E_max: 
+            return float('inf')
+        if energy <= 0: 
+            return 0
+            
         try:
             inner = 1 - math.sqrt((2 * energy) / (self.C_cap * (self.V_g**2)))
-            if inner <= 0: return float('inf')
+            if inner <= 0: 
+                return float('inf')
             
             cycles = math.ceil((-self.V_g * self.C_cap / self.delta_Q) * math.log(inner))
             return max(0, cycles)
@@ -279,42 +353,67 @@ class EnergyModel:
 
     def harvest_energy(self, current_energy: float, delta_t: float) -> float:
         """
-        Calculates the harvested energy added to the capacitor over a time delta.
+        Calculates the cumulative energy harvested into the capacitor over a given elapsed time.
+        Models the non-linear charging curve of a physical capacitor.
+        
+        @param current_energy (float): The existing stored energy.
+        @param delta_t (float): Time elapsed since the last update (in seconds).
+        
+        @return float: The newly calculated energy state, capped at E_max.
         """
-        if current_energy >= self.E_max: return self.E_max
+        if current_energy >= self.E_max: 
+            return self.E_max
         
         cycles_passed = int(delta_t * self.vibration_freq)
-        if cycles_passed == 0: return current_energy
+        if cycles_passed == 0: 
+            return current_energy
         
         current_cycles = self.get_current_cycles(current_energy)
-        if current_cycles == float('inf'): return self.E_max
+        if current_cycles == float('inf'): 
+            return self.E_max
         
         new_cycles = current_cycles + cycles_passed
         
-        # Calculate new stored energy
+        # Calculate new stored energy via the capacitor charging formula
         voltage_factor = 1 - math.exp(- (new_cycles * self.delta_Q) / (self.V_g * self.C_cap))
         new_energy = 0.5 * self.C_cap * (self.V_g * voltage_factor)**2
         
         return min(new_energy, self.E_max)
         
     def get_payload_size(self, param_type: str) -> int:
-        """Returns the data payload bit-size for the sensor type."""
+        """
+        Determines the data payload bit-size for the specific sensor type.
+        
+        @param param_type (str): The sensor identifier.
+        @return int: Data size in bits.
+        """
         sizes = {'ph': 8, 'so2': 8, 'temp': 16, 'press': 32, 'combined': 24}
         return sizes.get(param_type, 32)
 
     def get_sensing_cost(self, param_type: str) -> float: 
-        """Returns the hardware energy cost (in Joules) to physically take a measurement."""
+        """
+        Retrieves the hardware energy cost required to physically actuate the sensor.
+        
+        @param param_type (str): The sensor identifier.
+        @return float: The sensing cost in Joules.
+        """
         costs = {
             'ph': 1.5e-15,
             'temp': 97.64e-15,
             'press': 836e-15,
             'so2': 48e-9,
-            'combined': 1.5e-15 + 97.64e-15  # 99.14 fJ
+            'combined': 1.5e-15 + 97.64e-15  # 99.14 fJ for dual-actuation
         }
         return costs.get(param_type, 0.5e-15)
 
     def action_consumption(self, param_type: str) -> float:
-        """Calculates total energy consumed by sensing AND transmitting the data packet."""
+        """
+        Calculates the aggregate energy consumed by sensing the environment 
+        AND transmitting the subsequent data packet.
+        
+        @param param_type (str): The sensor identifier.
+        @return float: Total action energy expenditure in Joules.
+        """
         sensing_cost = self.get_sensing_cost(param_type)
         N_data = self.get_payload_size(param_type)
         N_bits = self.header_bits + N_data

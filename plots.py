@@ -1,3 +1,14 @@
+"""
+Data Visualization Module
+
+This module provides a suite of visualization tools to analyze the nanonetwork's
+performance. It is divided into three primary components:
+1. OptunaVisualizer: Generates interactive Plotly charts to analyze Bayesian optimization.
+2. SimulationVisualizer: Generates Matplotlib grid plots to observe baseline physiological trends.
+3. AnomalyVisualizer: Generates detailed Matplotlib subplots comparing raw vs. aggregated 
+   Kalman filter tracking and highlights the exact moment of anomaly detection.
+"""
+
 import matplotlib.pyplot as plt
 import math
 import numpy as np
@@ -14,12 +25,16 @@ class OptunaVisualizer:
     These plots analyze the search space, cost history, and parameter importance.
     """
     def __init__(self):
+        """Initializes the OptunaVisualizer."""
         pass
 
     def plot_1d_raw_tuning(self, study, title_suffix="Raw Filter"):
         """
         Visualizes a 1D tuning study (Single Parameter Raw Filter).
-        Since it's 1D, we only need the history to see how the cost dropped over time.
+        Since it is 1D, it exclusively plots the history to illustrate cost reduction over time.
+        
+        @param study (optuna.study.Study): The completed Optuna study object.
+        @param title_suffix (str): Contextual string appended to the plot title.
         """
         print(f"--- Visualization: {title_suffix} ---")
         history_fig = plot_optimization_history(study)
@@ -29,7 +44,10 @@ class OptunaVisualizer:
     def plot_2d_agg_tuning(self, study, title_suffix="Aggregated Filter"):
         """
         Visualizes a 2D tuning study (Single Parameter Aggregated Filter).
-        Shows cost history, parameter importance, and a 2D contour map of the search space.
+        Displays cost history, parameter importance, and a 2D contour map of the search space.
+        
+        @param study (optuna.study.Study): The completed Optuna study object.
+        @param title_suffix (str): Contextual string appended to the plot titles.
         """
         print(f"--- Visualization: {title_suffix} ---")
         
@@ -48,7 +66,10 @@ class OptunaVisualizer:
     def plot_combined_raw_tuning(self, study, title_suffix="Combined Raw Filter"):
         """
         Visualizes a 2D tuning study (Combined Parameter Raw Filter).
-        Shows the interplay between the pH drift threshold and Temp drift threshold.
+        Illustrates the interplay between the pH drift threshold and Temperature drift threshold.
+        
+        @param study (optuna.study.Study): The completed Optuna study object.
+        @param title_suffix (str): Contextual string appended to the plot titles.
         """
         print(f"--- Visualization: {title_suffix} ---")
         
@@ -67,7 +88,10 @@ class OptunaVisualizer:
     def plot_combined_agg_tuning(self, study, title_suffix="Combined Aggregated Filter"):
         """
         Visualizes a 3D tuning study (Combined Parameter Aggregated Filter).
-        Generates a 3x3 matrix contour plot comparing persistence vs pH vs Temp drift.
+        Generates a 3x3 matrix contour plot comparing persistence vs. pH vs. Temp drift thresholds.
+        
+        @param study (optuna.study.Study): The completed Optuna study object.
+        @param title_suffix (str): Contextual string appended to the plot titles.
         """
         print(f"--- Visualization: {title_suffix} ---")
         
@@ -91,23 +115,32 @@ class SimulationVisualizer:
     """
     Handles data visualization for general Nanobot simulation results.
     Useful for visualizing raw baseline data and simple moving averages 
-    before any complex anomaly detection is applied.
+    before any complex Kalman anomaly detection is applied.
     """
     
     def __init__(self, style="seaborn-v0_8-muted"):
+        """
+        Initializes the simulation visualizer with a specific Matplotlib style.
+        
+        @param style (str): The Matplotlib style string to format the plots.
+        """
         self.style = style
         # Default color palettes for consistent plotting across different methods
         self.colors = {
-            'raw': '#1f77b4',     # Muted Blue (Default raw data)
-            'trend': '#d62728',   # Strong Red (Default trend line)
-            'ph_raw': '#2ca02c',  # Green (pH specific raw data)
-            'ph_trend': '#1a591a' # Dark Green (pH specific trend line)
+            'raw': '#1f77b4',      # Muted Blue (Default raw data)
+            'trend': '#d62728',    # Strong Red (Default trend line)
+            'ph_raw': '#2ca02c',   # Green (pH specific raw data)
+            'ph_trend': '#1a591a'  # Dark Green (pH specific trend line)
         }
 
     def _prepare_zones(self, final_report, target_zones):
         """
         Helper method to filter and sort available zones for plotting.
         If specific zones are requested, it validates them against the dataset.
+        
+        @param final_report (pd.DataFrame): The simulation dataset.
+        @param target_zones (list): List of requested zone IDs, or None for all.
+        @return list: A validated, sorted list of zone IDs to plot.
         """
         available = sorted(final_report['Zone'].dropna().unique())
         if target_zones:
@@ -116,18 +149,18 @@ class SimulationVisualizer:
 
     def plot_zone_trends(self, final_report, target_zones=None, window=8):
         """
-        Plots a grid of temporal trends for a single parameter (e.g., Pressure or SO2).
-        Calculates and overlays a moving average to smooth out the noise.
+        Plots a grid of temporal trends for a single parameter (e.g., pH or Temp).
+        Calculates and overlays a moving average to smooth out high-frequency noise.
         
-        Args:
-            final_report (DataFrame): The output dataset from the simulator.
-            target_zones (list, optional): Specific zone IDs to plot.
-            window (int): The number of samples to include in the rolling average.
+        @param final_report (pd.DataFrame): The output dataset from the simulator.
+        @param target_zones (list, optional): Specific zone IDs to plot. Plots all if None.
+        @param window (int): The number of samples to include in the rolling average.
         """
         zones = self._prepare_zones(final_report, target_zones)
         num_zones = len(zones)
         if num_zones == 0:
-            print("No valid zones found for plotting."); return
+            print("No valid zones found for plotting.")
+            return
 
         # Calculate grid dimensions dynamically (Max 4 columns wide)
         ncols = min(num_zones, 4)
@@ -139,7 +172,7 @@ class SimulationVisualizer:
                 figsize=(5 * ncols, 3.8 * nrows), 
                 sharex=True # Share the X-axis across all subplots to align timeframes
             )
-            # Flatten axes array to easily iterate over it, even if it's 2D
+            # Flatten axes array to easily iterate over it, even if it is 2D
             axes_flat = np.array(axes).flatten()
 
             for i, zone in enumerate(zones):
@@ -158,9 +191,10 @@ class SimulationVisualizer:
 
                 ax.set_title(f"Zone {zone}", fontweight='bold')
                 ax.grid(True, linestyle='--', alpha=0.6)
-                if i == 0: ax.legend(fontsize=8)
+                if i == 0: 
+                    ax.legend(fontsize=8)
 
-            # Cleanup: Hide any empty subplots if the number of zones doesn't perfectly fill the grid
+            # Cleanup: Hide any empty subplots if the number of zones does not perfectly fill the grid
             for j in range(num_zones, len(axes_flat)):
                 axes_flat[j].set_visible(False)
 
@@ -172,16 +206,21 @@ class SimulationVisualizer:
     def plot_combined_trends(self, final_report, target_zones=None, window=8):
         """
         Plots paired trends for pH and Temperature in a side-by-side grid.
-        Every requested zone gets two adjacent plots.
+        Every requested zone is allocated two adjacent plots.
+        
+        @param final_report (pd.DataFrame): The combined multimodal dataset.
+        @param target_zones (list, optional): Specific zone IDs to plot.
+        @param window (int): The number of samples to include in the rolling average.
         """
         if not {'Median_pH', 'Median_Temp'}.issubset(final_report.columns):
-            print("Error: Report missing 'Median_pH' or 'Median_Temp' columns."); return
+            print("Error: Report missing 'Median_pH' or 'Median_Temp' columns.")
+            return
 
         zones = self._prepare_zones(final_report, target_zones)
         num_zones = len(zones)
         
         # Grid logic: Every zone takes up 2 columns (one for pH, one for Temp)
-        # Max 3 zones per row (which means 6 columns total)
+        # Max 3 zones per row (which results in 6 columns total)
         zones_per_row = min(num_zones, 3)
         ncols = zones_per_row * 2
         nrows = math.ceil(num_zones / zones_per_row)
@@ -230,24 +269,33 @@ class SimulationVisualizer:
 # ANOMALY DETECTION VISUALIZER
 # ==========================================
 
-# ==========================================
-# ANOMALY DETECTION VISUALIZER
-# ==========================================
-
 class AnomalyVisualizer:
     """
-    Handles plotting for the AnomalyDetector pipeline.
-    Visualizes raw noisy data, Kalman filter state lines, and precisely
-    highlights the moment the system flags a drift/anomaly.
+    Handles advanced plotting for the AnomalyDetector pipeline.
+    Visualizes raw noisy data, Kalman filter state lines, and precisely highlights 
+    the temporal moment the system triggers a diagnostic anomaly.
     """
     
     def __init__(self, style="seaborn-v0_8-muted"):
+        """
+        Initializes the anomaly visualizer.
+        
+        @param style (str): The Matplotlib style string to format the plots.
+        """
         self.style = style
 
     def plot_comparison(self, raw_df, agg_df, det_raw, det_agg, target_zones, title="Detection Time Comparison"):
         """
-        Creates a dynamic grid to compare Raw vs. Aggregated detection.
-        Plots every target zone PLUS any zone that triggered a False Positive.
+        Creates a dynamic grid to compare Raw vs. Aggregated detection performance.
+        Automatically isolates and plots every targeted diseased zone, plus any healthy 
+        zone that incorrectly triggered a False Positive.
+        
+        @param raw_df (pd.DataFrame): The processed raw data stream containing Kalman states.
+        @param agg_df (pd.DataFrame): The processed aggregated data stream containing Kalman states.
+        @param det_raw (dict): Dictionary mapping zones to their raw detection timestamps.
+        @param det_agg (dict): Dictionary mapping zones to their aggregated detection timestamps.
+        @param target_zones (list): List of ground-truth diseased zones.
+        @param title (str): Title for the entire figure grid.
         """
         # Create copies and convert time to hours for clean X-axis scaling
         r_df = raw_df.copy()
@@ -255,12 +303,12 @@ class AnomalyVisualizer:
         r_df['Time_Hours'] = r_df['Time_Seconds'] / 3600
         a_df['Time_Hours'] = a_df['Time_Seconds_End'] / 3600
 
-        # Find all unique zones we need to plot (Targets + Any False Alarms)
+        # Compile unique zones to plot (Targets + Any False Alarms)
         zones_to_plot = sorted(list(set(target_zones) | set(det_raw.keys()) | set(det_agg.keys())))
         nrows = len(zones_to_plot)
 
         with plt.style.context(self.style):
-            # 2 Columns: Col 0 = Raw, Col 1 = Agg
+            # 2 Columns: Col 0 = Raw Stream, Col 1 = Aggregated Stream
             # squeeze=False ensures axes is always a 2D array even if nrows=1
             fig, axes = plt.subplots(nrows, 2, figsize=(14, 4 * nrows), sharex=True, squeeze=False)
 
@@ -307,7 +355,15 @@ class AnomalyVisualizer:
     def plot_combined_comparison(self, raw_df, agg_df, det_raw, det_agg, target_zones, title="Combined Detection Comparison"):
         """
         Creates a dynamic 4-column grid for dual-parameter diseases.
-        Cols: [Raw pH] | [Raw Temp] | [Agg pH] | [Agg Temp]
+        Visualizes the independent Kalman tracking for both pH and Temperature across both data streams.
+        Columns: [Raw pH] | [Raw Temp] | [Agg pH] | [Agg Temp]
+        
+        @param raw_df (pd.DataFrame): The processed raw multimodal data stream.
+        @param agg_df (pd.DataFrame): The processed aggregated multimodal data stream.
+        @param det_raw (dict): Dictionary mapping zones to their multimodal raw detection timestamps.
+        @param det_agg (dict): Dictionary mapping zones to their multimodal aggregated detection timestamps.
+        @param target_zones (list): List of ground-truth diseased zones.
+        @param title (str): Title for the entire figure grid.
         """
         r_df = raw_df.copy()
         a_df = agg_df.copy()
@@ -318,7 +374,7 @@ class AnomalyVisualizer:
         nrows = len(zones_to_plot)
 
         with plt.style.context(self.style):
-            # 4 Columns for combined plots
+            # 4 Columns for combined plots, squeeze=False ensures 2D indexing
             fig, axes = plt.subplots(nrows, 4, figsize=(20, 4 * nrows), sharex=True, squeeze=False)
 
             for i, zone in enumerate(zones_to_plot):
@@ -328,7 +384,7 @@ class AnomalyVisualizer:
                 z_raw = r_df[r_df['Zone'] == zone]
                 z_agg = a_df[a_df['Zone'] == zone]
                 
-                # --- Col 0: Raw pH ---
+                # --- Column 0: Raw pH ---
                 ax = axes[i, 0]
                 ax.scatter(z_raw['Time_Hours'], z_raw['Value_pH'], alpha=0.2, color='gray', s=10)
                 ax.plot(z_raw['Time_Hours'], z_raw['Filtered_pH'], color='#1f77b4', linewidth=2)
@@ -337,7 +393,7 @@ class AnomalyVisualizer:
                 ax.set_title(f"RAW pH - {z_label}", fontweight='bold', color='black' if is_target else '#d62728')
                 ax.grid(True, linestyle='--', alpha=0.6)
 
-                # --- Col 1: Raw Temp ---
+                # --- Column 1: Raw Temperature ---
                 ax = axes[i, 1]
                 ax.scatter(z_raw['Time_Hours'], z_raw['Value_Temp'], alpha=0.2, color='gray', s=10)
                 ax.plot(z_raw['Time_Hours'], z_raw['Filtered_Temp'], color='#9467bd', linewidth=2)
@@ -346,7 +402,7 @@ class AnomalyVisualizer:
                 ax.set_title(f"RAW Temp - {z_label}", fontweight='bold', color='black' if is_target else '#d62728')
                 ax.grid(True, linestyle='--', alpha=0.6)
 
-                # --- Col 2: Aggregated pH ---
+                # --- Column 2: Aggregated pH ---
                 ax = axes[i, 2]
                 ax.scatter(z_agg['Time_Hours'], z_agg['Median_pH'], alpha=0.8, color='#ff7f0e', marker='s')
                 ax.plot(z_agg['Time_Hours'], z_agg['Filtered_pH'], color='#2ca02c', linewidth=2)
@@ -355,7 +411,7 @@ class AnomalyVisualizer:
                 ax.set_title(f"AGG pH - {z_label}", fontweight='bold', color='black' if is_target else '#d62728')
                 ax.grid(True, linestyle='--', alpha=0.6)
 
-                # --- Col 3: Aggregated Temp ---
+                # --- Column 3: Aggregated Temperature ---
                 ax = axes[i, 3]
                 ax.scatter(z_agg['Time_Hours'], z_agg['Median_Temp'], alpha=0.8, color='#ff7f0e', marker='s')
                 ax.plot(z_agg['Time_Hours'], z_agg['Filtered_Temp'], color='#8c564b', linewidth=2)

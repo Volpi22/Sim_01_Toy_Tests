@@ -1,3 +1,13 @@
+"""
+Disease Simulation Module
+
+This module simulates the localized onset and progression of physiological 
+pathologies within a nanonetwork environment. It overlays dynamic time-series 
+shifts (e.g., temperature spikes, pH drops) onto baseline spatial coordinates 
+while simulating hardware constraints like nanobot energy limits and stochastic 
+sensor errors.
+"""
+
 import pandas as pd
 import numpy as np
 import random
@@ -12,10 +22,15 @@ class DiseaseSimulator:
     """
     
     # BUFFER_TIME ensures the simulation continues for at least 2 hours after the disease peaks
+    # to allow observation of the Kalman filter's continuous tracking behavior.
     BUFFER_TIME = 7200 
 
     def __init__(self, df_path='position_data.csv'):
-        """Initializes the simulator with anatomical mappings and disease profiles."""
+        """
+        Initializes the simulator with anatomical mappings and disease profiles.
+        
+        @param df_path (str): The file path to the baseline spatial trace CSV.
+        """
         self.dm = DataManager()
         self.df_path = df_path
         self.zone_to_vessels = self.dm.ZONE_TO_VESSELS
@@ -133,6 +148,11 @@ class DiseaseSimulator:
     # ==========================================
 
     def _load_data(self):
+        """
+        Loads and pre-processes the baseline spatial dataset.
+        
+        @return pd.DataFrame: Time-sorted dataframe of nanobot positional data.
+        """
         if not os.path.exists(self.df_path):
             raise FileNotFoundError(f"Missing input: {self.df_path}")
         cols = ['Nanobot_ID', 'Pos_X', 'Pos_Y', 'Pos_Z', 'Time_Seconds', 'Vessel_ID', 'Stream_ID']
@@ -142,24 +162,60 @@ class DiseaseSimulator:
         return df
 
     def _update_bot_energy(self, state, t, energy_model):
+        """
+        Updates a specific nanobot's energy state based on elapsed time.
+        
+        @param state (dict): The current state dictionary of the nanobot.
+        @param t (float): The current simulation time in seconds.
+        @param energy_model (EnergyModel): The mathematical energy model instance.
+        
+        @return dict: The updated nanobot state dictionary.
+        """
         delta_t = t - state['last_time']
         state['last_time'] = t
         
         if delta_t > 0:
+            # Add harvested energy and subtract passive idle drain
             state['energy'] = energy_model.harvest_energy(state['energy'], delta_t)
             state['energy'] = max(0, state['energy'] - (energy_model.idle_drain_per_sec * delta_t))
             
-        if state['energy'] <= energy_model.E_off: state['is_awake'] = False
-        elif state['energy'] >= energy_model.E_on: state['is_awake'] = True
+        # Toggle power state based on thresholds
+        if state['energy'] <= energy_model.E_off: 
+            state['is_awake'] = False
+        elif state['energy'] >= energy_model.E_on: 
+            state['is_awake'] = True
+            
         return state
 
     def _get_affected_vessels(self, zones):
+        """
+        Maps a list of macroscopic anatomical zones to their constituent micro-vessels.
+        
+        @param zones (list): A list of integer zone IDs.
+        @return list: A flat list of specific vessel IDs affected by the disease.
+        """
         vessels = []
         for z in zones:
             vessels.extend(self.zone_to_vessels.get(z, []))
         return vessels
 
     def _get_diseased_value(self, data_dict, vessel_id, beta, t, affected_vessels, shift_val, t_start, t_peak):
+        """
+        Generates a synthetic physiological measurement, accounting for both disease 
+        interpolation (if applicable) and stochastic sensing errors.
+        
+        @param data_dict (dict): Dictionary mapping vessels to their baseline min/max values.
+        @param vessel_id (int): The vessel being sampled.
+        @param beta (float): Probability of a measurement error (0.0 to 1.0).
+        @param t (float): Current simulation time.
+        @param affected_vessels (list): Vessels targeted by the simulated disease.
+        @param shift_val (float): The maximum deviation caused by the disease.
+        @param t_start (float): Time the disease begins to manifest.
+        @param t_peak (float): Time the disease reaches maximum severity.
+        
+        @return float: The final synthesized measurement.
+        """
+        # --- 1. SENSOR ERROR INJECTION (BETA NOISE) ---
         if vessel_id not in data_dict:
             chosen_id = random.choice(list(data_dict.keys()))
         elif random.random() < beta:
@@ -171,7 +227,9 @@ class DiseaseSimulator:
             
         min_val, max_val = data_dict[chosen_id]
         
+        # --- 2. DISEASE INTERPOLATION SHIFT ---
         if chosen_id in affected_vessels and t > t_start:
+            # Calculate the linear interpolation factor (0.0 to 1.0)
             f = min(1.0, (t - t_start) / (t_peak - t_start))
             current_shift = shift_val * f
             min_val += current_shift
@@ -181,7 +239,13 @@ class DiseaseSimulator:
 
     def _generate_disease_timeline(self, max_t, progression_time, safe_start_time=14400):
         """
-        Dynamically calculates the onset and peak based on the specific disease's progression velocity.
+        Dynamically calculates a safe onset and peak time based on disease velocity.
+        
+        @param max_t (float): The total length of the simulation in seconds.
+        @param progression_time (float): The duration from disease onset to peak severity.
+        @param safe_start_time (float): Minimum time to allow the system to calibrate healthy baselines.
+        
+        @return tuple: (t_start, t_peak)
         """
         latest_possible_start = max(safe_start_time, max_t - progression_time - self.BUFFER_TIME)
         
@@ -198,12 +262,24 @@ class DiseaseSimulator:
     # ==========================================
 
     def run_single_disease(self, alpha, beta, disease_key, target_confidence=70.0, safe_start_time=14400):
+        """
+        Executes a simulation for a pathology affecting a single parameter (e.g., pH only).
+        
+        @param alpha (float): The localization error probability.
+        @param beta (float): The sensing error probability.
+        @param disease_key (str): The specific pathology to simulate.
+        @param target_confidence (float): The binomial confidence required to dispatch an aggregated packet.
+        @param safe_start_time (float): The minimum time before a disease can start.
+        
+        @return tuple: (raw_df, aggregated_df, t_start)
+        """
         if disease_key not in self.diseases:
-            print(f"Error: Disease '{disease_key}' not found."); return None, None, None
+            print(f"Error: Disease '{disease_key}' not found.")
+            return None, None, None
             
         profile = self.diseases[disease_key]
         param = profile['param']
-        progression_time = profile['progression_time'] # Extract specific velocity
+        progression_time = profile['progression_time'] 
         
         data_dict = self.dm.get_data_dict(param)
         precision = self.dm.get_decimal_precision(param)
@@ -228,11 +304,16 @@ class DiseaseSimulator:
             if pd.isna(vessel): continue
                 
             if nid not in bot_states:
-                bot_states[nid] = {'energy': energy_model.E_max, 'is_awake': True, 'has_sampled_this_cycle': False, 'last_time': t, 'previous_vessel': None}
+                bot_states[nid] = {
+                    'energy': energy_model.E_max, 'is_awake': True, 
+                    'has_sampled_this_cycle': False, 'last_time': t, 'previous_vessel': None
+                }
             
             state = self._update_bot_energy(bot_states[nid], t, energy_model)
             
-            if vessel == 2 and state['previous_vessel'] != 2: state['has_sampled_this_cycle'] = False
+            # Reset sampling capability if entering a new anatomical cycle
+            if vessel == 2 and state['previous_vessel'] != 2: 
+                state['has_sampled_this_cycle'] = False
                 
             if state['is_awake'] and not state['has_sampled_this_cycle'] and random.random() < 0.05:
                 val = self._get_diseased_value(data_dict, vessel, beta, t, affected_vessels, shift_val, t_start, t_peak)
@@ -244,7 +325,9 @@ class DiseaseSimulator:
                 state['energy'] = max(0, state['energy'] - energy_model.action_consumption(param))
                 state['has_sampled_this_cycle'] = True
                 
+                # Check for swarm aggregation confidence once all zones have samples
                 if len(buffers) == 20: 
+                    # Memoize confidence calculation to speed up simulation
                     if all(conf_cache.setdefault(len(v), StatsUtils.obtain_confidence_binomial(alpha, beta, len(v))) >= target_confidence for v in buffers.values()):
                         for k, vals in buffers.items():
                             final_results.append({
@@ -258,11 +341,23 @@ class DiseaseSimulator:
         return pd.DataFrame(raw_results), pd.DataFrame(final_results), t_start
 
     def run_combined_disease(self, alpha, beta, disease_key, target_confidence=70.0, safe_start_time=14400):
+        """
+        Executes a simulation for a combined pathology affecting both pH and Temperature simultaneously.
+        
+        @param alpha (float): The localization error probability.
+        @param beta (float): The base sensing error probability (often tied to the worst-case sensor).
+        @param disease_key (str): The specific combined pathology to simulate.
+        @param target_confidence (float): The binomial confidence required to dispatch an aggregated packet.
+        @param safe_start_time (float): The minimum time before a disease can start.
+        
+        @return tuple: (raw_df, aggregated_df, t_start)
+        """
         if disease_key not in self.diseases:
-            print(f"Error: Disease '{disease_key}' not found."); return None, None, None
+            print(f"Error: Disease '{disease_key}' not found.")
+            return None, None, None
 
         profile = self.diseases[disease_key]
-        progression_time = profile['progression_time'] # Extract specific velocity
+        progression_time = profile['progression_time'] 
         affected_vessels = self._get_affected_vessels(profile['zones'])
         ph_shift, temp_shift = profile['shifts']['ph'], profile['shifts']['temp']
         
@@ -271,7 +366,6 @@ class DiseaseSimulator:
 
         df = self._load_data()
         
-        # Pass the dynamic progression time
         t_start, t_peak = self._generate_disease_timeline(df['Time_Seconds'].max(), progression_time, safe_start_time)
         print(f"[{disease_key.upper()}] Velocity: {progression_time/3600:.1f}h | Random Onset: Hour {t_start/3600:.1f} | Peak: Hour {t_peak/3600:.1f}")
         
@@ -287,10 +381,15 @@ class DiseaseSimulator:
             if pd.isna(vessel): continue
                 
             if nid not in bot_states:
-                bot_states[nid] = {'energy': energy_model.E_max, 'is_awake': True, 'has_sampled_this_cycle': False, 'last_time': t, 'previous_vessel': None}
+                bot_states[nid] = {
+                    'energy': energy_model.E_max, 'is_awake': True, 
+                    'has_sampled_this_cycle': False, 'last_time': t, 'previous_vessel': None
+                }
             
             state = self._update_bot_energy(bot_states[nid], t, energy_model)
-            if vessel == 2 and state['previous_vessel'] != 2: state['has_sampled_this_cycle'] = False
+            
+            if vessel == 2 and state['previous_vessel'] != 2: 
+                state['has_sampled_this_cycle'] = False
                 
             if state['is_awake'] and not state['has_sampled_this_cycle'] and random.random() < 0.05:
                 val_ph = self._get_diseased_value(ph_dict, vessel, beta, t, affected_vessels, ph_shift, t_start, t_peak)
