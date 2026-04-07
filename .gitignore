@@ -9,3 +9,6 @@ optuna_study_ph.db
 optuna_study_temp.db
 optuna_study_combined.db
 optimization.log
+optuna_study_zscore_ph.db
+optuna_study_zscore_temp.db
+optuna_study_zscore_combined.db

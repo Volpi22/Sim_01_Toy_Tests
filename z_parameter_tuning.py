@@ -151,7 +151,7 @@ def run_zscore_optimizations(datasets_to_tune=['ph', 'temp', 'combined'], save_p
         completed_studies[p_type] = {}
         # Changed DB name to prevent overwriting your old static runs
         db_url = f"sqlite:///optuna_study_zscore_{p_type}.db"
-        SAFE_CORES = 5
+        SAFE_CORES = 3
         
         raw_opt = ZScoreFilterOptimizer(f'datasets/tuning_dataset_{p_type}_raw.parquet', stream_type='raw', param_type=p_type)
         study_raw = optuna.create_study(direction="minimize", study_name=f"Z_Raw_{p_type}", storage=db_url, load_if_exists=True)
