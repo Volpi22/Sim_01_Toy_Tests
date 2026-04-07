@@ -10,6 +10,7 @@ primary filter variants:
 
 The AnomalyDetector class serves as a high-performance, NumPy-vectorized router 
 to process entire DataFrames and track multiple anatomical zones simultaneously.
+It supports both Static Absolute Thresholds and Adaptive Variance-Scaled Thresholds (Z-Scoring).
 """
 
 import numpy as np
@@ -183,36 +184,31 @@ class AnomalyDetector:
     """
     Whole-body Anomaly Detector processing router.
     Uses optimized NumPy masking to process all bodily zones independently, maintaining 
-    separate baselines and Kalman filters for each anatomical region. Capable of handling 
-    both raw and aggregated streams for single or combined (multimodal) pathologies.
+    separate baselines and Kalman filters for each anatomical region. 
+    
+    Now supports both Static Thresholding AND Adaptive Variance-Scaled Z-Scoring.
     """
     def __init__(self, alpha=0.05, beta=0.1, target_confidence=70.0, 
                  raw_drift_threshold=2.5, raw_drift_ph=1.5, raw_drift_temp=3.5, 
                  agg_persistence=3, agg_abs_drift=0.05, agg_abs_drift_ph=0.10, agg_abs_drift_temp=0.5,
-                 beta_ph=None, beta_temp=None, raw_leakage=0.98): 
+                 beta_ph=None, beta_temp=None, raw_leakage=0.98,
+                 # --- NEW Z-SCORE PARAMETERS ---
+                 use_z_score=False, 
+                 k_raw_multiplier=3.0, k_agg_multiplier=3.0,
+                 k_raw_ph=3.0, k_raw_temp=3.0,
+                 k_agg_ph=3.0, k_agg_temp=3.0): 
         """
-        Initializes the Anomaly Detector router with hyperparameters across all sensors.
-        
-        @param alpha (float): Base localization error probability.
-        @param beta (float): Base measurement error probability.
-        @param target_confidence (float): Binomial confidence threshold needed to calibrate initial baselines.
-        @param raw_drift_threshold (float): Generic CUSUM drift threshold.
-        @param raw_drift_ph/temp (float): Sensor-specific CUSUM thresholds.
-        @param agg_persistence (int): Consecutive packet hits to trigger an alert.
-        @param agg_abs_drift (float): Generic absolute drift threshold.
-        @param agg_abs_drift_ph/temp (float): Sensor-specific absolute drift thresholds.
-        @param beta_ph/temp (float): Sensor-specific measurement errors (defaults to generic beta if None).
-        @param raw_leakage (float): Learned decay factor for the RawStreamKalman CUSUM buffers.
+        Initializes the Anomaly Detector router.
         """
         self.alpha = alpha
-        self.beta = beta # Used for single streams and overall Binomial Confidence anchoring
+        self.beta = beta 
         
-        # If specific sensor noise profiles aren't provided, default to the conservative generic beta
         self.beta_ph = beta_ph if beta_ph is not None else beta
         self.beta_temp = beta_temp if beta_temp is not None else beta
         
         self.target_confidence = target_confidence
         
+        # Original Static Parameters
         self.raw_drift_threshold = raw_drift_threshold
         self.raw_drift_ph = raw_drift_ph
         self.raw_drift_temp = raw_drift_temp
@@ -222,22 +218,24 @@ class AnomalyDetector:
         self.agg_abs_drift = agg_abs_drift
         self.agg_abs_drift_ph = agg_abs_drift_ph
         self.agg_abs_drift_temp = agg_abs_drift_temp
+        
+        # New Adaptive Z-Score Parameters
+        self.use_z_score = use_z_score
+        self.k_raw_multiplier = k_raw_multiplier
+        self.k_agg_multiplier = k_agg_multiplier
+        self.k_raw_ph = k_raw_ph
+        self.k_raw_temp = k_raw_temp
+        self.k_agg_ph = k_agg_ph
+        self.k_agg_temp = k_agg_temp
 
     # ==========================================
     # 1. RAW STREAM (SINGLE PARAMETER)
     # ==========================================
     def detect_raw_stream(self, raw_df):
-        """
-        Processes a raw ping time-series DataFrame for a single physiological parameter.
-        
-        @param raw_df (pd.DataFrame): The incoming raw nanobot data.
-        @return tuple: (processed_df (pd.DataFrame), detection_times (dict mapping Zone -> Time))
-        """
         if raw_df.empty: return raw_df, {}
         
         df_out = raw_df.copy().sort_values(['Zone', 'Time_Seconds'])
         
-        # Convert to fast NumPy arrays for vectorized masking
         zones = df_out['Zone'].values
         times = df_out['Time_Seconds'].values
         values = df_out['Value'].values
@@ -258,24 +256,32 @@ class AnomalyDetector:
             for i in range(len(z_vals)):
                 val = z_vals[i]
                 
-                # Buffer initial readings dynamically until statistical confidence is reached
                 if not baseline_established:
                     buffer.append(val)
                     if StatsUtils.obtain_confidence_binomial(self.alpha, self.beta, len(buffer)) >= self.target_confidence:
                         dynamic_baseline = np.median(buffer)
+                        
+                        # Calculate zone-specific variance
+                        zone_std = max(np.std(buffer), 1e-5)
+                        
+                        # Apply Z-Score adaptive limit OR static limit
+                        if self.use_z_score:
+                            active_drift_threshold = self.k_raw_multiplier * zone_std
+                        else:
+                            active_drift_threshold = self.raw_drift_threshold
+                            
                         kf = RawStreamKalman(
                             alpha=self.alpha, beta=self.beta, 
                             initial_val=dynamic_baseline, 
-                            drift_threshold=self.raw_drift_threshold, 
+                            drift_threshold=active_drift_threshold, 
                             leakage=self.raw_leakage
                         )
                         baseline_established = True
-                        z_filt[:i+1] = dynamic_baseline # Backfill the calibration phase
+                        z_filt[:i+1] = dynamic_baseline
                 else:
                     is_drift, x_val = kf.check_zone(zone, val)
                     z_filt[i] = x_val
                     
-                    # Log the exact time of the very first formal anomaly trigger
                     if is_drift and det_time is None:
                         det_time = z_times[i]
 
@@ -290,17 +296,10 @@ class AnomalyDetector:
     # 2. AGGREGATED STREAM (SINGLE PARAMETER)
     # ==========================================
     def detect_aggregated_stream(self, agg_df):
-        """
-        Processes an aggregated median time-series DataFrame for a single parameter.
-        
-        @param agg_df (pd.DataFrame): The incoming aggregated packet data.
-        @return tuple: (processed_df (pd.DataFrame), detection_times (dict mapping Zone -> Time))
-        """
         if agg_df.empty: return agg_df, {}
         
         df_out = agg_df.copy().sort_values(['Zone', 'Time_Seconds_End'])
         
-        # Ensure Binomial confidence is mapped for adaptive noise scaling
         if 'Binomial_%' not in df_out.columns:
             df_out['Binomial_%'] = df_out['Count'].apply(lambda n: StatsUtils.obtain_confidence_binomial(self.alpha, self.beta, n))
 
@@ -317,6 +316,7 @@ class AnomalyDetector:
             z_vals, z_times, z_confs = values[mask], times[mask], confs[mask]
             z_filt = np.zeros(len(z_vals))
             
+            buffer = []
             baseline_established = False
             kf = None
             det_time = None
@@ -324,17 +324,25 @@ class AnomalyDetector:
             for i in range(len(z_vals)):
                 val, conf = z_vals[i], z_confs[i]
                 
-                # For aggregated streams, baseline is defined by the first highly confident packet
                 if not baseline_established:
+                    buffer.append(val)
                     if conf >= self.target_confidence:
-                        dynamic_baseline = val
+                        dynamic_baseline = np.median(buffer)
+                        
+                        zone_std = max(np.std(buffer), 1e-5)
+                        
+                        if self.use_z_score:
+                            active_drift_threshold = self.k_agg_multiplier * zone_std
+                        else:
+                            active_drift_threshold = self.agg_abs_drift
+                            
                         kf = AggregatedKalman(
                             initial_val=dynamic_baseline, 
                             persistence=self.agg_persistence, 
-                            abs_drift_threshold=self.agg_abs_drift
+                            abs_drift_threshold=active_drift_threshold
                         )
                         baseline_established = True
-                        z_filt[i] = dynamic_baseline
+                        z_filt[:i+1] = dynamic_baseline
                 else:
                     is_drift, x_val = kf.check_zone(zone, val, conf)
                     z_filt[i] = x_val
@@ -352,12 +360,6 @@ class AnomalyDetector:
     # 3. RAW STREAM (COMBINED PARAMETERS)
     # ==========================================
     def detect_combined_raw_stream(self, raw_df):
-        """
-        Processes a raw ping time-series DataFrame containing multimodal data (pH AND Temp).
-        
-        @param raw_df (pd.DataFrame): The incoming raw multimodal nanobot data.
-        @return tuple: (processed_df (pd.DataFrame), detection_times (dict mapping Zone -> {ph_time, temp_time}))
-        """
         if raw_df.empty: return raw_df, {}
         
         df_out = raw_df.copy().sort_values(['Zone', 'Time_Seconds'])
@@ -389,23 +391,36 @@ class AnomalyDetector:
                 if not baseline_established:
                     buf_ph.append(v_ph)
                     buf_temp.append(v_temp)
-                    # Notice we still use self.beta (the conservative/highest one) to compute combined confidence
+                    
                     if StatsUtils.obtain_confidence_binomial(self.alpha, self.beta, len(buf_ph)) >= self.target_confidence:
+                        dyn_base_ph = np.median(buf_ph)
+                        dyn_base_temp = np.median(buf_temp)
+                        
+                        std_ph = max(np.std(buf_ph), 1e-5)
+                        std_temp = max(np.std(buf_temp), 1e-5)
+                        
+                        if self.use_z_score:
+                            active_drift_ph = self.k_raw_ph * std_ph
+                            active_drift_temp = self.k_raw_temp * std_temp
+                        else:
+                            active_drift_ph = self.raw_drift_ph
+                            active_drift_temp = self.raw_drift_temp
+                        
                         kf_ph = RawStreamKalman(
                             alpha=self.alpha, beta=self.beta_ph, 
-                            initial_val=np.median(buf_ph), 
-                            drift_threshold=self.raw_drift_ph, 
+                            initial_val=dyn_base_ph, 
+                            drift_threshold=active_drift_ph, 
                             leakage=self.raw_leakage
                         )
                         kf_temp = RawStreamKalman(
                             alpha=self.alpha, beta=self.beta_temp, 
-                            initial_val=np.median(buf_temp), 
-                            drift_threshold=self.raw_drift_temp, 
+                            initial_val=dyn_base_temp, 
+                            drift_threshold=active_drift_temp, 
                             leakage=self.raw_leakage
                         )
                         baseline_established = True
-                        out_ph[:i+1] = np.median(buf_ph)
-                        out_temp[:i+1] = np.median(buf_temp)
+                        out_ph[:i+1] = dyn_base_ph
+                        out_temp[:i+1] = dyn_base_temp
                 else:
                     is_drift_ph, x_ph = kf_ph.check_zone(zone, v_ph)
                     is_drift_temp, x_temp = kf_temp.check_zone(zone, v_temp)
@@ -418,7 +433,6 @@ class AnomalyDetector:
             filt_ph[mask] = out_ph
             filt_temp[mask] = out_temp
             
-            # Record detection dict if EITHER parameter drifted
             if det_ph is not None or det_temp is not None:
                 detection_times[zone] = {'ph': det_ph, 'temp': det_temp}
 
@@ -430,17 +444,10 @@ class AnomalyDetector:
     # 4. AGGREGATED STREAM (COMBINED PARAMETERS)
     # ==========================================
     def detect_combined_aggregated_stream(self, agg_df):
-        """
-        Processes an aggregated packet DataFrame containing multimodal data (pH AND Temp).
-        
-        @param agg_df (pd.DataFrame): The incoming aggregated multimodal data.
-        @return tuple: (processed_df (pd.DataFrame), detection_times (dict mapping Zone -> {ph_time, temp_time}))
-        """
         if agg_df.empty: return agg_df, {}
         
         df_out = agg_df.copy().sort_values(['Zone', 'Time_Seconds_End'])
         if 'Binomial_%' not in df_out.columns:
-            # Use the conservative self.beta for cross-modal confidence calculation
             df_out['Binomial_%'] = df_out['Count'].apply(lambda n: StatsUtils.obtain_confidence_binomial(self.alpha, self.beta, n))
 
         zones = df_out['Zone'].values
@@ -459,6 +466,7 @@ class AnomalyDetector:
             z_ph, z_temp = val_ph[mask], val_temp[mask]
             
             out_ph, out_temp = np.zeros(len(z_ph)), np.zeros(len(z_temp))
+            buf_ph, buf_temp = [], []
             
             baseline_established = False
             kf_ph, kf_temp = None, None
@@ -468,11 +476,36 @@ class AnomalyDetector:
                 v_ph, v_temp, conf = z_ph[i], z_temp[i], z_confs[i]
                 
                 if not baseline_established:
+                    buf_ph.append(v_ph)
+                    buf_temp.append(v_temp)
+                    
                     if conf >= self.target_confidence:
-                        kf_ph = AggregatedKalman(initial_val=v_ph, persistence=self.agg_persistence, abs_drift_threshold=self.agg_abs_drift_ph)
-                        kf_temp = AggregatedKalman(initial_val=v_temp, persistence=self.agg_persistence, abs_drift_threshold=self.agg_abs_drift_temp)
+                        dyn_base_ph = np.median(buf_ph)
+                        dyn_base_temp = np.median(buf_temp)
+                        
+                        std_ph = max(np.std(buf_ph), 1e-5)
+                        std_temp = max(np.std(buf_temp), 1e-5)
+                        
+                        if self.use_z_score:
+                            act_drift_ph = self.k_agg_ph * std_ph
+                            act_drift_temp = self.k_agg_temp * std_temp
+                        else:
+                            act_drift_ph = self.agg_abs_drift_ph
+                            act_drift_temp = self.agg_abs_drift_temp
+                            
+                        kf_ph = AggregatedKalman(
+                            initial_val=dyn_base_ph, 
+                            persistence=self.agg_persistence, 
+                            abs_drift_threshold=act_drift_ph
+                        )
+                        kf_temp = AggregatedKalman(
+                            initial_val=dyn_base_temp, 
+                            persistence=self.agg_persistence, 
+                            abs_drift_threshold=act_drift_temp
+                        )
                         baseline_established = True
-                        out_ph[i], out_temp[i] = v_ph, v_temp
+                        out_ph[:i+1] = dyn_base_ph
+                        out_temp[:i+1] = dyn_base_temp
                 else:
                     is_drift_ph, x_ph = kf_ph.check_zone(zone, v_ph, conf)
                     is_drift_temp, x_temp = kf_temp.check_zone(zone, v_temp, conf)

@@ -6,6 +6,7 @@ against stochastic physiological simulations. It supports:
 1. Parallelized execution of diseased and healthy scenarios.
 2. Multi-run statistical aggregation to calculate Mean +/- Standard Deviation.
 3. Strict clinical categorization of alerts (True Positives, False Positives, Spatial Error).
+4. Dual-Architecture Support: Evaluates both Static Thresholds and Adaptive Z-Scoring.
 """
 
 from diseases import DiseaseSimulator
@@ -327,18 +328,20 @@ class ComprehensiveTestSuite:
     """
     Benchmark engine designed for rapid execution of the clinical hold-out test.
     Utilizes multiprocessing to run stochastic simulations in parallel and 
-    aggregates multi-run statistics.
+    aggregates multi-run statistics. Now supports Z-score architecture testing.
     """
-    def __init__(self, optimized_params, test_trace_path='position_data.csv', alpha=0.3, beta=0.10):
+    def __init__(self, optimized_params, use_z_score=False, test_trace_path='position_data.csv', alpha=0.3, beta=0.10):
         """
         Initializes the test suite.
         
         @param optimized_params (dict): Hyperparameters from Optuna.
+        @param use_z_score (bool): If True, tests the Adaptive Variance-Scaled architecture.
         @param test_trace_path (str): The hold-out CSV trace.
         """
         self.alpha = alpha
         self.beta = beta
         self.params = optimized_params
+        self.use_z_score = use_z_score
         self.test_trace_path = test_trace_path
         self.evaluator = FinalPerformanceEvaluator()
         
@@ -370,29 +373,55 @@ class ComprehensiveTestSuite:
         simulator = DiseaseSimulator(df_path=self.test_trace_path)
         d_info = self.disease_dict[d_key]
         
-        # Branching logic based on pathology type (Single vs Combined)
         if d_info['type'] == 'single':
             raw_df, agg_df, t_start = simulator.run_single_disease(self.alpha, self.beta, d_key)
-            detector = AnomalyDetector(
-                alpha=self.alpha, beta=self.beta,
-                raw_drift_threshold=self.params[f"{d_info['param']}_raw_drift"],
-                raw_leakage=self.params[f"{d_info['param']}_raw_leakage"],
-                agg_persistence=self.params[f"{d_info['param']}_agg_pers"],
-                agg_abs_drift=self.params[f"{d_info['param']}_agg_drift"]
-            )
+            
+            # --- Z-SCORE VS STATIC BRANCHING ---
+            if self.use_z_score:
+                detector = AnomalyDetector(
+                    alpha=self.alpha, beta=self.beta, use_z_score=True,
+                    k_raw_multiplier=self.params[f"{d_info['param']}_k_raw"],
+                    k_agg_multiplier=self.params[f"{d_info['param']}_k_agg"],
+                    raw_leakage=self.params[f"{d_info['param']}_raw_leakage"],
+                    agg_persistence=self.params[f"{d_info['param']}_agg_pers"]
+                )
+            else:
+                detector = AnomalyDetector(
+                    alpha=self.alpha, beta=self.beta, use_z_score=False,
+                    raw_drift_threshold=self.params[f"{d_info['param']}_raw_drift"],
+                    raw_leakage=self.params[f"{d_info['param']}_raw_leakage"],
+                    agg_persistence=self.params[f"{d_info['param']}_agg_pers"],
+                    agg_abs_drift=self.params[f"{d_info['param']}_agg_drift"]
+                )
+                
             _, det_raw = detector.detect_raw_stream(raw_df)
             _, det_agg = detector.detect_aggregated_stream(agg_df)
+            
         else: 
             raw_df, agg_df, t_start = simulator.run_combined_disease(self.alpha, self.beta, d_key)
-            detector = AnomalyDetector(
-                alpha=self.alpha, beta=self.beta, beta_ph=0.10, beta_temp=0.01,
-                raw_drift_ph=self.params['comb_raw_drift_ph'],
-                raw_drift_temp=self.params['comb_raw_drift_temp'],
-                raw_leakage=self.params['comb_raw_leakage'],
-                agg_persistence=self.params['comb_agg_pers'],
-                agg_abs_drift_ph=self.params['comb_agg_drift_ph'],
-                agg_abs_drift_temp=self.params['comb_agg_drift_temp']
-            )
+            
+            # --- Z-SCORE VS STATIC BRANCHING ---
+            if self.use_z_score:
+                detector = AnomalyDetector(
+                    alpha=self.alpha, beta=self.beta, beta_ph=0.10, beta_temp=0.01, use_z_score=True,
+                    k_raw_ph=self.params['comb_k_raw_ph'],
+                    k_raw_temp=self.params['comb_k_raw_temp'],
+                    k_agg_ph=self.params['comb_k_agg_ph'],
+                    k_agg_temp=self.params['comb_k_agg_temp'],
+                    raw_leakage=self.params['comb_raw_leakage'],
+                    agg_persistence=self.params['comb_agg_pers']
+                )
+            else:
+                detector = AnomalyDetector(
+                    alpha=self.alpha, beta=self.beta, beta_ph=0.10, beta_temp=0.01, use_z_score=False,
+                    raw_drift_ph=self.params['comb_raw_drift_ph'],
+                    raw_drift_temp=self.params['comb_raw_drift_temp'],
+                    raw_leakage=self.params['comb_raw_leakage'],
+                    agg_persistence=self.params['comb_agg_pers'],
+                    agg_abs_drift_ph=self.params['comb_agg_drift_ph'],
+                    agg_abs_drift_temp=self.params['comb_agg_drift_temp']
+                )
+                
             _, det_raw = detector.detect_combined_raw_stream(raw_df) 
             _, det_agg = detector.detect_combined_aggregated_stream(agg_df)
 
@@ -404,13 +433,24 @@ class ComprehensiveTestSuite:
         simulator = DiseaseSimulator(df_path=self.test_trace_path)
         raw_df, agg_df, _ = simulator.run_single_disease(self.alpha, self.beta, 'systemic_fever_temp', safe_start_time=86400)
         
-        detector = AnomalyDetector(
-            alpha=self.alpha, beta=self.beta,
-            raw_drift_threshold=self.params['ph_raw_drift'],
-            raw_leakage=self.params['ph_raw_leakage'],
-            agg_persistence=self.params['ph_agg_pers'],
-            agg_abs_drift=self.params['ph_agg_drift']
-        )
+        # We use the pH parameters to rigorously stress-test the healthy baseline
+        if self.use_z_score:
+            detector = AnomalyDetector(
+                alpha=self.alpha, beta=self.beta, use_z_score=True,
+                k_raw_multiplier=self.params['ph_k_raw'],
+                k_agg_multiplier=self.params['ph_k_agg'],
+                raw_leakage=self.params['ph_raw_leakage'],
+                agg_persistence=self.params['ph_agg_pers']
+            )
+        else:
+            detector = AnomalyDetector(
+                alpha=self.alpha, beta=self.beta, use_z_score=False,
+                raw_drift_threshold=self.params['ph_raw_drift'],
+                raw_leakage=self.params['ph_raw_leakage'],
+                agg_persistence=self.params['ph_agg_pers'],
+                agg_abs_drift=self.params['ph_agg_drift']
+            )
+            
         _, det_raw = detector.detect_raw_stream(raw_df)
         _, det_agg = detector.detect_aggregated_stream(agg_df)
 
@@ -424,7 +464,8 @@ class ComprehensiveTestSuite:
         @param num_iterations (int): Total number of suite cycles to execute.
         """
         cores = max(1, multiprocessing.cpu_count() // 2)
-        print(f"Starting Multi-Run Parallel Test Suite ({num_iterations} iterations) on {cores} cores...")
+        arch_type = "Z-SCORE" if self.use_z_score else "STATIC THRESHOLD"
+        print(f"Starting {arch_type} Multi-Run Parallel Test Suite ({num_iterations} iterations) on {cores} cores...")
         
         all_raw_runs, all_agg_runs = [], []
 
@@ -434,5 +475,5 @@ class ComprehensiveTestSuite:
             all_agg_runs.append(agg_iter)
         
         print("\nAll iterations finished. Calculating cross-run statistics...")
-        self.evaluator.evaluate_multi_run(all_raw_runs, "RAW STREAM")
-        self.evaluator.evaluate_multi_run(all_agg_runs, "AGGREGATED STREAM")
+        self.evaluator.evaluate_multi_run(all_raw_runs, f"RAW STREAM ({arch_type})")
+        self.evaluator.evaluate_multi_run(all_agg_runs, f"AGGREGATED STREAM ({arch_type})")
