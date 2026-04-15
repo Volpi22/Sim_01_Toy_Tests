@@ -12,3 +12,7 @@ optimization.log
 optuna_study_zscore_ph.db
 optuna_study_zscore_temp.db
 optuna_study_zscore_combined.db
+optuna_study_target_post_op_combined.db
+optuna_study_target_diabetes_combined.db
+optuna_study_target_zscore_post_op_combined.db
+optuna_study_target_zscore_diabetes_combined.db
