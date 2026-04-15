@@ -8,6 +8,8 @@ while simulating hardware constraints like nanobot energy limits and stochastic
 sensor errors.
 """
 
+import profile
+
 import pandas as pd
 import numpy as np
 import random
@@ -359,7 +361,8 @@ class DiseaseSimulator:
         profile = self.diseases[disease_key]
         progression_time = profile['progression_time'] 
         affected_vessels = self._get_affected_vessels(profile['zones'])
-        ph_shift, temp_shift = profile['shifts']['ph'], profile['shifts']['temp']
+        ph_shift = profile['shifts'].get('ph', 0.0)
+        temp_shift = profile['shifts'].get('temp', 0.0) 
         
         ph_dict = self.dm.get_data_dict('ph')
         temp_dict = self.dm.get_data_dict('temp')
