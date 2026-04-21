@@ -8,6 +8,7 @@ against stochastic physiological simulations. It supports:
 3. Strict clinical categorization of alerts (True Positives, False Positives, Spatial Error).
 4. Dual-Architecture Support: Evaluates both Static Thresholds and Adaptive Z-Scoring.
 5. Disease-Level Granularity: Breaks down performance metrics by specific pathology.
+6. Top-5 Disease Spatial Classification Ranking.
 """
 
 from diseases import DiseaseSimulator
@@ -206,13 +207,15 @@ class FinalPerformanceEvaluator:
     """
     Orchestrates the clinical scoring of the nanonetwork. 
     Distinguishes between Patient-Level survival metrics and Zone-Level spatial accuracy.
-    Now includes granular, pathology-specific evaluation while retaining single-run tests.
+    Now includes Top-5 Disease Ranking based on Spatial Overlap (Jaccard Index).
     """
-    def __init__(self, total_zones=20):
+    def __init__(self, disease_dict=None, total_zones=20):
         """
+        @param disease_dict (dict): Dictionary of all diseases to compute spatial rankings.
         @param total_zones (int): Total anatomical regions monitored.
         """
         self.total_zones = total_zones
+        self.disease_dict = disease_dict or {}
 
     def evaluate_test_suite(self, results_list, stream_name):
         """
@@ -237,8 +240,9 @@ class FinalPerformanceEvaluator:
         """
         metrics = {
             'patient_recall': [], 'zone_recall': [], 
-            'zone_precision': [], 'mean_npl': [],
-            'patient_fp': [], 'zone_fp': [], 'system_accuracy': []
+            'zone_precision': [], 'system_accuracy': [], 'mean_npl': [],
+            'patient_fp': [], 'zone_fp': [],
+            'top5_classification_accuracy': [], 'healthy_classification_accuracy': []
         }
 
         for results_list in all_runs_results:
@@ -246,21 +250,21 @@ class FinalPerformanceEvaluator:
             for k, v in stats.items():
                 metrics[k].append(v)
 
-        print(f"\n{'='*60}")
+        print(f"\n{'='*75}")
         print(f" {stream_name} - FINAL MULTI-RUN STATISTICAL REPORT")
-        print(f"{'='*60}")
+        print(f"{'='*75}")
         
         for k, v in metrics.items():
             mean_val = np.mean(v)
             std_val = np.std(v)
             
             display_name = k.replace('_', ' ').title()
-            unit = "%" if any(x in k for x in ["accuracy", "recall", "precision", "npl"]) else "counts"
+            unit = "%" if any(x in k for x in ["recall", "precision", "npl", "accuracy"]) else " counts"
             
             mult = 100.0 if unit == "%" else 1.0
-            print(f" -> {display_name}: {mean_val*mult:.2f}{unit} (+/- {std_val*mult:.2f})")
+            print(f" -> {display_name:<32}: {mean_val*mult:>6.2f}{unit} (+/- {std_val*mult:.2f})")
         
-        print(f"{'='*60}\n")
+        print(f"{'='*75}\n")
         
     def evaluate_disease_level_multi_run(self, all_runs_results, stream_name):
         """
@@ -269,9 +273,9 @@ class FinalPerformanceEvaluator:
         @param all_runs_results (list): Collection of result lists from multiple iterations.
         @param stream_name (str): The identifier for the data stream evaluated.
         """
-        print(f"\n{'-'*70}")
+        print(f"\n{'-'*75}")
         print(f" {stream_name} - DISEASE-LEVEL BREAKDOWN")
-        print(f"{'-'*70}")
+        print(f"{'-'*75}")
 
         # Extract all unique disease keys present in the results
         all_keys = set()
@@ -288,8 +292,9 @@ class FinalPerformanceEvaluator:
         for d_key in disease_keys:
             metrics = {
                 'patient_recall': [], 'zone_recall': [], 
-                'zone_precision': [], 'mean_npl': [],
-                'patient_fp': [], 'zone_fp': [], 'system_accuracy': []
+                'zone_precision': [], 'system_accuracy': [], 'mean_npl': [],
+                'patient_fp': [], 'zone_fp': [],
+                'top5_classification_accuracy': [], 'healthy_classification_accuracy': []
             }
 
             for run_results in all_runs_results:
@@ -307,52 +312,64 @@ class FinalPerformanceEvaluator:
                 m_pat_fp, s_pat_fp = np.mean(metrics['patient_fp']), np.std(metrics['patient_fp'])
                 m_zon_fp, s_zon_fp = np.mean(metrics['zone_fp']), np.std(metrics['zone_fp'])
                 m_acc, s_acc = np.mean(metrics['system_accuracy']), np.std(metrics['system_accuracy'])
+                m_h_acc, s_h_acc = np.mean(metrics['healthy_classification_accuracy']), np.std(metrics['healthy_classification_accuracy'])
                 
-                print(f"    -> False Alarms (Patients) : {m_pat_fp:.2f} (+/- {s_pat_fp:.2f})")
-                print(f"    -> Spatial Leakage (Zones) : {m_zon_fp:.2f} (+/- {s_zon_fp:.2f})")
-                print(f"    -> System Accuracy         : {m_acc*100.0:>6.2f}% (+/- {s_acc*100.0:.2f})")
+                print(f"    -> False Alarms (Patients)         : {m_pat_fp:.2f} (+/- {s_pat_fp:.2f})")
+                print(f"    -> Spatial Leakage (Zones)         : {m_zon_fp:.2f} (+/- {s_zon_fp:.2f})")
+                print(f"    -> System Accuracy                 : {m_acc*100.0:>6.2f}% (+/- {s_acc*100.0:.2f})")
+                print(f"    -> Healthy Classification Accuracy : {m_h_acc*100.0:>6.2f}% (+/- {s_h_acc*100.0:.2f})")
             else:
                 # For diseases, print the full diagnostic breakdown
                 for k, v in metrics.items():
                     # Skip printing FP for individual diseases unless desired, focus on detection efficacy
-                    if k in ['patient_fp', 'zone_fp']: continue 
+                    if k in ['patient_fp', 'zone_fp', 'healthy_classification_accuracy']: continue 
                     
                     mean_val = np.mean(v)
                     std_val = np.std(v)
                     display_name = k.replace('_', ' ').title()
-                    
-                    # Ensure 'accuracy' is recognized here as well
                     unit = "%" if any(x in k for x in ["recall", "precision", "npl", "accuracy"]) else " counts"
                     mult = 100.0 if unit == "%" else 1.0
                     
-                    print(f"    -> {display_name:<25}: {mean_val*mult:>6.2f}{unit} (+/- {std_val*mult:.2f})")
+                    print(f"    -> {display_name:<30}: {mean_val*mult:>6.2f}{unit} (+/- {std_val*mult:.2f})")
 
     def _get_scalars(self, results_list):
         """
-        Internal mathematical engine to extract scalar metrics from a list of results.
+        Internal mathematical engine to extract scalar metrics, including 
+        Top-5 Jaccard Disease Ranking.
         """
         patient_tp, patient_fp, patient_fn = 0, 0, 0
-        zone_tp, zone_fp, zone_fn = 0, 0, 0
-        zone_tn = 0
+        zone_tp, zone_fp, zone_fn, zone_tn = 0, 0, 0, 0
         total_eval_zones = 0 
         npl_list = []
+        
+        # Classification Ranking Counters
+        top5_hits, top5_evals = 0, 0
+        healthy_correct, healthy_evals = 0, 0
 
         for res in results_list:
+            d_key = res.get('Disease_Key', 'Unknown')
             target_zones = res['Target_Zones']
             t_start = res['True_t_start']
             t_peak = res['True_t_peak']
             det_times = res['Detection_Times']  
 
-            # Scenario 1: Healthy Controls
-            if not target_zones or target_zones == [-1]:  
+            triggered_zones = set(det_times.keys())
+
+            # SCENARIO 1: Healthy Controls
+            if d_key == 'healthy' or not target_zones or target_zones == [-1]:  
                 fp_count = len(det_times)
                 patient_fp += 1 if fp_count > 0 else 0
                 zone_fp += fp_count
-                zone_tn += (20 - fp_count)  # The rest were correctly identified as healthy
+                zone_tn += (20 - fp_count)  
                 total_eval_zones += 20
+                
+                # Healthy Classification Logic
+                healthy_evals += 1
+                if fp_count == 0:
+                    healthy_correct += 1 # Classified correctly as healthy
                 continue
 
-            # Scenario 2: Diseased Patients
+            # SCENARIO 2: Diseased Patients
             prog_window = max(t_peak - t_start, 1)
             patient_hit = False
             
@@ -376,27 +393,48 @@ class FinalPerformanceEvaluator:
             else: 
                 patient_fn += 1
 
-            # Calculate spatial leakage (False Positives in healthy zones)
             leakage = len([z for z in det_times.keys() if z not in target_zones])
             zone_fp += leakage
-            
-            # Calculate True Negatives (Healthy zones that were correctly ignored)
-            # Total zones (20) minus the diseased zones, minus the ones we falsely triggered on
             zone_tn += (20 - len(target_zones)) - leakage
             total_eval_zones += 20
             
             if leakage > 0 and not patient_hit: 
                 patient_fp += 1 
+                
+            # TOP-5 SPATIAL CLASSIFICATION RANKING
+            top5_evals += 1
+            if len(triggered_zones) > 0 and self.disease_dict:
+                scores = {}
+                for comp_key, comp_info in self.disease_dict.items():
+                    if comp_key == 'healthy': continue
+                    dz_set = set(comp_info['zones'])
+                    
+                    # Jaccard Index (Intersection over Union)
+                    intersection = len(triggered_zones.intersection(dz_set))
+                    union = len(triggered_zones.union(dz_set))
+                    scores[comp_key] = intersection / union if union > 0 else 0
+                
+                # Sort diseases by spatial score (descending)
+                ranked = sorted(scores.keys(), key=lambda k: scores[k], reverse=True)
+                
+                # Filter Top 5 (Must have at least 1 overlapping zone to count)
+                top_5 = [k for k in ranked[:5] if scores[k] > 0]
+                
+                if d_key in top_5:
+                    top5_hits += 1
 
         return {
             'patient_recall': patient_tp / (patient_tp + patient_fn) if (patient_tp + patient_fn) > 0 else 0,
             'zone_recall': zone_tp / (zone_tp + zone_fn) if (zone_tp + zone_fn) > 0 else 0,
             'zone_precision': zone_tp / (zone_tp + zone_fp) if (zone_tp + zone_fp) > 0 else 0,
-            'system_accuracy': (zone_tp + zone_tn) / total_eval_zones if total_eval_zones > 0 else 0, # NEW METRIC
+            'system_accuracy': (zone_tp + zone_tn) / total_eval_zones if total_eval_zones > 0 else 0,
             'mean_npl': np.mean(npl_list) if npl_list else 1.0,
             'patient_fp': patient_fp,
-            'zone_fp': zone_fp
+            'zone_fp': zone_fp,
+            'top5_classification_accuracy': top5_hits / top5_evals if top5_evals > 0 else 0,
+            'healthy_classification_accuracy': healthy_correct / healthy_evals if healthy_evals > 0 else 0
         }
+
 # ==========================================
 # COMPREHENSIVE TEST SUITE (PARALLELIZED)
 # ==========================================
@@ -420,13 +458,15 @@ class ComprehensiveTestSuite:
         self.params = optimized_params
         self.use_z_score = use_z_score
         self.test_trace_path = test_trace_path
-        self.evaluator = FinalPerformanceEvaluator()
         
         # Meta-data extraction
         temp_sim = DiseaseSimulator(df_path=self.test_trace_path)
         self.diseases = list(temp_sim.diseases.keys())
         self.disease_dict = temp_sim.diseases
         del temp_sim
+        
+        # Pass the disease dict to the evaluator for Ranking logic
+        self.evaluator = FinalPerformanceEvaluator(disease_dict=self.disease_dict)
 
     def _run_one_full_iteration(self, iter_idx, cores):
         """
@@ -600,11 +640,13 @@ class TargetedCohortTestSuite:
         self.alpha = alpha
         self.beta = beta
         self.beta_temp = beta_temp
-        self.evaluator = FinalPerformanceEvaluator()
         
         temp_sim = DiseaseSimulator(df_path=self.test_trace_path)
         self.disease_dict = temp_sim.diseases
         del temp_sim
+        
+        # Pass the disease dict to the evaluator for Ranking logic
+        self.evaluator = FinalPerformanceEvaluator(disease_dict=self.disease_dict)
 
     def _run_one_targeted_iteration(self, iter_idx, cores):
         """Executes one full diagnostic cycle for the targeted cohort."""

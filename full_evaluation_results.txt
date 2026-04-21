@@ -5,3 +5,1216 @@
 ================================================================================
 Starting STATIC THRESHOLD Multi-Run Parallel Test Suite (10 iterations) on 16 cores...
  --- Starting Iteration 1 ---
+ --- Starting Iteration 2 ---
+ --- Starting Iteration 3 ---
+ --- Starting Iteration 4 ---
+ --- Starting Iteration 5 ---
+ --- Starting Iteration 6 ---
+ --- Starting Iteration 7 ---
+ --- Starting Iteration 8 ---
+ --- Starting Iteration 9 ---
+ --- Starting Iteration 10 ---
+
+All iterations finished. Calculating cross-run statistics...
+
+===========================================================================
+ RAW STREAM (STATIC THRESHOLD) - FINAL MULTI-RUN STATISTICAL REPORT
+===========================================================================
+ -> Patient Recall                  : 100.00% (+/- 0.00)
+ -> Zone Recall                     :  86.22% (+/- 1.34)
+ -> Zone Precision                  :  17.28% (+/- 0.29)
+ -> System Accuracy                 :  41.90% (+/- 0.74)
+ -> Mean Npl                        :  28.49% (+/- 1.03)
+ -> Patient Fp                      :  15.00 counts (+/- 0.00)
+ -> Zone Fp                         : 338.50 counts (+/- 4.67)
+ -> Top5 Classification Accuracy    :  86.67% (+/- 0.00)
+ -> Healthy Classification Accuracy :   0.00% (+/- 0.00)
+===========================================================================
+
+
+===========================================================================
+ AGGREGATED STREAM (STATIC THRESHOLD) - FINAL MULTI-RUN STATISTICAL REPORT
+===========================================================================
+ -> Patient Recall                  : 100.00% (+/- 0.00)
+ -> Zone Recall                     :  99.51% (+/- 0.81)
+ -> Zone Precision                  :  29.46% (+/- 0.63)
+ -> System Accuracy                 :  67.42% (+/- 0.92)
+ -> Mean Npl                        :  60.93% (+/- 2.22)
+ -> Patient Fp                      :  15.00 counts (+/- 0.00)
+ -> Zone Fp                         : 195.50 counts (+/- 5.54)
+ -> Top5 Classification Accuracy    : 100.00% (+/- 0.00)
+ -> Healthy Classification Accuracy :   0.00% (+/- 0.00)
+===========================================================================
+
+
+---------------------------------------------------------------------------
+ RAW STREAM (STATIC THRESHOLD) - DISEASE-LEVEL BREAKDOWN
+---------------------------------------------------------------------------
+
+   [ PATHOLOGY: ARTERIAL_OCCLUSION_TEMP ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :   6.46% (+/- 0.78)
+    -> System Accuracy               :  26.50% (+/- 8.96)
+    -> Mean Npl                      :  26.04% (+/- 4.47)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: DKA_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  79.05% (+/- 8.96)
+    -> System Accuracy               :  93.00% (+/- 3.32)
+    -> Mean Npl                      :  26.08% (+/- 4.25)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: DVT_TEMP ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  46.67% (+/- 20.48)
+    -> System Accuracy               :  92.50% (+/- 4.61)
+    -> Mean Npl                      :  24.15% (+/- 3.08)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: ENDOCARDITIS_TEMP ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   :  96.67% (+/- 10.00)
+    -> Zone Precision                :  69.67% (+/- 6.78)
+    -> System Accuracy               :  93.50% (+/- 2.29)
+    -> Mean Npl                      :  78.08% (+/- 8.42)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: ISCHEMIA_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  14.03% (+/- 4.24)
+    -> System Accuracy               :  66.00% (+/- 11.58)
+    -> Mean Npl                      :  32.85% (+/- 5.30)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: ISCHEMIC_BOWEL_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  85.00% (+/- 22.91)
+    -> System Accuracy               :  98.50% (+/- 2.29)
+    -> Mean Npl                      :  28.77% (+/- 2.68)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: MALIGNANT_HYPERTHERMIA_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  34.57% (+/- 8.00)
+    -> System Accuracy               :  49.50% (+/- 13.87)
+    -> Mean Npl                      :  19.41% (+/- 1.16)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: MENINGITIS_TEMP ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  43.33% (+/- 8.16)
+    -> System Accuracy               :  93.00% (+/- 2.45)
+    -> Mean Npl                      :  29.22% (+/- 7.88)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: NEC_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                : 100.00% (+/- 0.00)
+    -> System Accuracy               : 100.00% (+/- 0.00)
+    -> Mean Npl                      :  22.18% (+/- 2.09)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: PYELO_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  95.00% (+/- 15.00)
+    -> System Accuracy               :  99.50% (+/- 1.50)
+    -> Mean Npl                      :  31.91% (+/- 2.33)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: RTA_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                : 100.00% (+/- 0.00)
+    -> System Accuracy               : 100.00% (+/- 0.00)
+    -> Mean Npl                      :  31.77% (+/- 3.09)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: SEPTIC_SHOCK_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   :  72.00% (+/- 3.32)
+    -> Zone Precision                :  98.04% (+/- 3.01)
+    -> System Accuracy               :  72.00% (+/- 3.32)
+    -> Mean Npl                      :  26.43% (+/- 2.36)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: STROKE_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                : 100.00% (+/- 0.00)
+    -> System Accuracy               : 100.00% (+/- 0.00)
+    -> Mean Npl                      :  24.33% (+/- 1.30)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: SYSTEMIC_ALKALOSIS_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                : 100.00% (+/- 0.00)
+    -> System Accuracy               : 100.00% (+/- 0.00)
+    -> Mean Npl                      :  30.33% (+/- 0.89)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: SYSTEMIC_FEVER_TEMP ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   :  72.00% (+/- 3.32)
+    -> Zone Precision                :  94.75% (+/- 2.64)
+    -> System Accuracy               :  72.00% (+/- 3.32)
+    -> Mean Npl                      :  22.29% (+/- 2.41)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: HEALTHY ]
+    -> False Alarms (Patients)         : 15.00 (+/- 0.00)
+    -> Spatial Leakage (Zones)         : 299.80 (+/- 0.40)
+    -> System Accuracy                 :   0.07% (+/- 0.13)
+    -> Healthy Classification Accuracy :   0.00% (+/- 0.00)
+
+---------------------------------------------------------------------------
+ AGGREGATED STREAM (STATIC THRESHOLD) - DISEASE-LEVEL BREAKDOWN
+---------------------------------------------------------------------------
+
+   [ PATHOLOGY: ARTERIAL_OCCLUSION_TEMP ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                : 100.00% (+/- 0.00)
+    -> System Accuracy               : 100.00% (+/- 0.00)
+    -> Mean Npl                      :  95.28% (+/- 6.95)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: DKA_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  95.00% (+/- 7.64)
+    -> System Accuracy               :  98.50% (+/- 2.29)
+    -> Mean Npl                      :  28.41% (+/- 0.91)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: DVT_TEMP ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                : 100.00% (+/- 0.00)
+    -> System Accuracy               : 100.00% (+/- 0.00)
+    -> Mean Npl                      :  57.13% (+/- 7.06)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: ENDOCARDITIS_TEMP ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                : 100.00% (+/- 0.00)
+    -> System Accuracy               : 100.00% (+/- 0.00)
+    -> Mean Npl                      :  43.85% (+/- 0.84)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: ISCHEMIA_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                : 100.00% (+/- 0.00)
+    -> System Accuracy               : 100.00% (+/- 0.00)
+    -> Mean Npl                      :  90.84% (+/- 8.74)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: ISCHEMIC_BOWEL_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  90.00% (+/- 20.00)
+    -> System Accuracy               :  99.00% (+/- 2.00)
+    -> Mean Npl                      :  63.84% (+/- 8.57)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: MALIGNANT_HYPERTHERMIA_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  96.67% (+/- 6.67)
+    -> System Accuracy               :  99.00% (+/- 2.00)
+    -> Mean Npl                      :  99.33% (+/- 2.01)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: MENINGITIS_TEMP ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  95.00% (+/- 15.00)
+    -> System Accuracy               :  99.50% (+/- 1.50)
+    -> Mean Npl                      :  53.08% (+/- 4.70)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: NEC_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  83.33% (+/- 25.82)
+    -> System Accuracy               :  98.00% (+/- 3.32)
+    -> Mean Npl                      :  53.54% (+/- 6.66)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: PYELO_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  95.00% (+/- 15.00)
+    -> System Accuracy               :  99.50% (+/- 1.50)
+    -> Mean Npl                      :  60.65% (+/- 8.87)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: RTA_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  85.00% (+/- 22.91)
+    -> System Accuracy               :  98.50% (+/- 2.29)
+    -> Mean Npl                      :  47.42% (+/- 6.14)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: SEPTIC_SHOCK_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   :  99.00% (+/- 2.00)
+    -> Zone Precision                :  99.00% (+/- 2.00)
+    -> System Accuracy               :  99.00% (+/- 2.00)
+    -> Mean Npl                      :  57.61% (+/- 4.59)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: STROKE_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  80.00% (+/- 24.49)
+    -> System Accuracy               :  98.00% (+/- 2.45)
+    -> Mean Npl                      :  88.73% (+/- 12.91)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: SYSTEMIC_ALKALOSIS_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   :  99.00% (+/- 2.00)
+    -> Zone Precision                :  99.00% (+/- 2.00)
+    -> System Accuracy               :  99.00% (+/- 2.00)
+    -> Mean Npl                      :  70.63% (+/- 5.79)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: SYSTEMIC_FEVER_TEMP ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                : 100.00% (+/- 0.00)
+    -> System Accuracy               : 100.00% (+/- 0.00)
+    -> Mean Npl                      :  52.63% (+/- 3.53)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: HEALTHY ]
+    -> False Alarms (Patients)         : 15.00 (+/- 0.00)
+    -> Spatial Leakage (Zones)         : 193.10 (+/- 5.32)
+    -> System Accuracy                 :  35.63% (+/- 1.77)
+    -> Healthy Classification Accuracy :   0.00% (+/- 0.00)
+
+
+================================================================================
+ === 2. COMPREHENSIVE GENERALIZED EVALUATION (Z-SCORE) ===
+================================================================================
+Starting Z-SCORE Multi-Run Parallel Test Suite (10 iterations) on 16 cores...
+ --- Starting Iteration 1 ---
+ --- Starting Iteration 2 ---
+ --- Starting Iteration 3 ---
+ --- Starting Iteration 4 ---
+ --- Starting Iteration 5 ---
+ --- Starting Iteration 6 ---
+ --- Starting Iteration 7 ---
+ --- Starting Iteration 8 ---
+ --- Starting Iteration 9 ---
+ --- Starting Iteration 10 ---
+
+All iterations finished. Calculating cross-run statistics...
+
+===========================================================================
+ RAW STREAM (Z-SCORE) - FINAL MULTI-RUN STATISTICAL REPORT
+===========================================================================
+ -> Patient Recall                  :  53.33% (+/- 5.96)
+ -> Zone Recall                     :  27.68% (+/- 4.08)
+ -> Zone Precision                  :   4.25% (+/- 0.62)
+ -> System Accuracy                 :  14.67% (+/- 0.91)
+ -> Mean Npl                        :  26.32% (+/- 3.59)
+ -> Patient Fp                      :  21.80 counts (+/- 0.98)
+ -> Zone Fp                         : 510.80 counts (+/- 5.71)
+ -> Top5 Classification Accuracy    :  33.33% (+/- 0.00)
+ -> Healthy Classification Accuracy :   0.00% (+/- 0.00)
+===========================================================================
+
+
+===========================================================================
+ AGGREGATED STREAM (Z-SCORE) - FINAL MULTI-RUN STATISTICAL REPORT
+===========================================================================
+ -> Patient Recall                  :  10.67% (+/- 4.42)
+ -> Zone Recall                     :   3.05% (+/- 1.57)
+ -> Zone Precision                  :   0.42% (+/- 0.22)
+ -> System Accuracy                 :   1.45% (+/- 0.39)
+ -> Mean Npl                        :  78.61% (+/- 19.05)
+ -> Patient Fp                      :  26.20 counts (+/- 0.75)
+ -> Zone Fp                         : 591.30 counts (+/- 2.37)
+ -> Top5 Classification Accuracy    :  33.33% (+/- 0.00)
+ -> Healthy Classification Accuracy :   0.00% (+/- 0.00)
+===========================================================================
+
+
+---------------------------------------------------------------------------
+ RAW STREAM (Z-SCORE) - DISEASE-LEVEL BREAKDOWN
+---------------------------------------------------------------------------
+
+   [ PATHOLOGY: ARTERIAL_OCCLUSION_TEMP ]
+    -> Patient Recall                :  80.00% (+/- 40.00)
+    -> Zone Recall                   :  80.00% (+/- 40.00)
+    -> Zone Precision                :   4.13% (+/- 2.07)
+    -> System Accuracy               :   6.50% (+/- 4.50)
+    -> Mean Npl                      :  41.66% (+/- 29.48)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: DKA_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   :  66.00% (+/- 15.62)
+    -> Zone Precision                :  16.80% (+/- 4.13)
+    -> System Accuracy               :  18.00% (+/- 5.57)
+    -> Mean Npl                      :  39.32% (+/- 7.60)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: DVT_TEMP ]
+    -> Patient Recall                :  50.00% (+/- 50.00)
+    -> Zone Recall                   :  50.00% (+/- 50.00)
+    -> Zone Precision                :   2.86% (+/- 2.89)
+    -> System Accuracy               :  11.00% (+/- 8.60)
+    -> Mean Npl                      :  64.49% (+/- 37.49)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: ENDOCARDITIS_TEMP ]
+    -> Patient Recall                :  30.00% (+/- 45.83)
+    -> Zone Recall                   :  10.00% (+/- 15.28)
+    -> Zone Precision                :   1.64% (+/- 2.50)
+    -> System Accuracy               :   9.50% (+/- 4.72)
+    -> Mean Npl                      :  94.39% (+/- 13.65)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: ISCHEMIA_COMBINED ]
+    -> Patient Recall                :  70.00% (+/- 45.83)
+    -> Zone Recall                   :  70.00% (+/- 45.83)
+    -> Zone Precision                :   3.50% (+/- 2.29)
+    -> System Accuracy               :   3.50% (+/- 2.29)
+    -> Mean Npl                      :  42.69% (+/- 37.65)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: ISCHEMIC_BOWEL_COMBINED ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   2.50% (+/- 4.03)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: MALIGNANT_HYPERTHERMIA_COMBINED ]
+    -> Patient Recall                :  10.00% (+/- 30.00)
+    -> Zone Recall                   :   2.00% (+/- 6.00)
+    -> Zone Precision                :   0.50% (+/- 1.50)
+    -> System Accuracy               :   1.00% (+/- 2.00)
+    -> Mean Npl                      :  91.61% (+/- 25.16)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: MENINGITIS_TEMP ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :  12.00% (+/- 5.10)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: NEC_PH ]
+    -> Patient Recall                :  40.00% (+/- 48.99)
+    -> Zone Recall                   :  40.00% (+/- 48.99)
+    -> Zone Precision                :   2.38% (+/- 2.94)
+    -> System Accuracy               :  22.00% (+/- 8.12)
+    -> Mean Npl                      :  64.50% (+/- 43.54)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: PYELO_COMBINED ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   2.00% (+/- 2.45)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: RTA_PH ]
+    -> Patient Recall                :  90.00% (+/- 30.00)
+    -> Zone Recall                   :  90.00% (+/- 30.00)
+    -> Zone Precision                :   7.46% (+/- 2.64)
+    -> System Accuracy               :  43.00% (+/- 7.14)
+    -> Mean Npl                      :  31.61% (+/- 26.53)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: SEPTIC_SHOCK_COMBINED ]
+    -> Patient Recall                :  80.00% (+/- 40.00)
+    -> Zone Recall                   :   7.00% (+/- 6.00)
+    -> Zone Precision                :   7.00% (+/- 6.00)
+    -> System Accuracy               :   7.00% (+/- 6.00)
+    -> Mean Npl                      :  30.76% (+/- 34.74)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: STROKE_PH ]
+    -> Patient Recall                :  50.00% (+/- 50.00)
+    -> Zone Recall                   :  50.00% (+/- 50.00)
+    -> Zone Precision                :   3.59% (+/- 3.66)
+    -> System Accuracy               :  31.50% (+/- 9.50)
+    -> Mean Npl                      :  57.70% (+/- 42.45)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: SYSTEMIC_ALKALOSIS_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   :  53.00% (+/- 7.81)
+    -> Zone Precision                :  56.10% (+/- 8.02)
+    -> System Accuracy               :  53.00% (+/- 7.81)
+    -> Mean Npl                      :  25.92% (+/- 4.40)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: SYSTEMIC_FEVER_TEMP ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   :  16.00% (+/- 10.44)
+    -> Zone Precision                :  16.03% (+/- 10.41)
+    -> System Accuracy               :  16.00% (+/- 10.44)
+    -> Mean Npl                      :  23.88% (+/- 9.82)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: HEALTHY ]
+    -> False Alarms (Patients)         : 15.00 (+/- 0.00)
+    -> Spatial Leakage (Zones)         : 259.70 (+/- 3.44)
+    -> System Accuracy                 :  13.43% (+/- 1.15)
+    -> Healthy Classification Accuracy :   0.00% (+/- 0.00)
+
+---------------------------------------------------------------------------
+ AGGREGATED STREAM (Z-SCORE) - DISEASE-LEVEL BREAKDOWN
+---------------------------------------------------------------------------
+
+   [ PATHOLOGY: ARTERIAL_OCCLUSION_TEMP ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: DKA_PH ]
+    -> Patient Recall                :  20.00% (+/- 40.00)
+    -> Zone Recall                   :   4.00% (+/- 8.00)
+    -> Zone Precision                :   1.08% (+/- 2.16)
+    -> System Accuracy               :   9.50% (+/- 5.68)
+    -> Mean Npl                      :  85.95% (+/- 28.52)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: DVT_TEMP ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: ENDOCARDITIS_TEMP ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: ISCHEMIA_COMBINED ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: ISCHEMIC_BOWEL_COMBINED ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: MALIGNANT_HYPERTHERMIA_COMBINED ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: MENINGITIS_TEMP ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: NEC_PH ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   7.00% (+/- 7.48)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: PYELO_COMBINED ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: RTA_PH ]
+    -> Patient Recall                :  30.00% (+/- 45.83)
+    -> Zone Recall                   :  30.00% (+/- 45.83)
+    -> Zone Precision                :   1.55% (+/- 2.37)
+    -> System Accuracy               :   6.00% (+/- 4.90)
+    -> Mean Npl                      :  81.81% (+/- 27.92)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: SEPTIC_SHOCK_COMBINED ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: STROKE_PH ]
+    -> Patient Recall                :  30.00% (+/- 45.83)
+    -> Zone Recall                   :  30.00% (+/- 45.83)
+    -> Zone Precision                :   1.64% (+/- 2.52)
+    -> System Accuracy               :  12.50% (+/- 4.61)
+    -> Mean Npl                      :  98.96% (+/- 2.16)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: SYSTEMIC_ALKALOSIS_PH ]
+    -> Patient Recall                :  80.00% (+/- 40.00)
+    -> Zone Recall                   :   8.50% (+/- 6.73)
+    -> Zone Precision                :   8.50% (+/- 6.73)
+    -> System Accuracy               :   8.50% (+/- 6.73)
+    -> Mean Npl                      :  93.67% (+/- 8.83)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: SYSTEMIC_FEVER_TEMP ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: HEALTHY ]
+    -> False Alarms (Patients)         : 15.00 (+/- 0.00)
+    -> Spatial Leakage (Zones)         : 300.00 (+/- 0.00)
+    -> System Accuracy                 :   0.00% (+/- 0.00)
+    -> Healthy Classification Accuracy :   0.00% (+/- 0.00)
+
+
+================================================================================
+ === TARGETED STATIC EVALUATION: POST_OP ===
+================================================================================
+
+Starting STATIC THRESHOLD TARGETED COMBINED Test Suite for POST_OP...
+ -> 5 Targeted Pathologies + 5 Matched Healthy Controls
+ -> Executing 10 Stochastic Iterations on 16 cores...
+ --- Starting Targeted Iteration 1 ---
+ --- Starting Targeted Iteration 2 ---
+ --- Starting Targeted Iteration 3 ---
+ --- Starting Targeted Iteration 4 ---
+ --- Starting Targeted Iteration 5 ---
+ --- Starting Targeted Iteration 6 ---
+ --- Starting Targeted Iteration 7 ---
+ --- Starting Targeted Iteration 8 ---
+ --- Starting Targeted Iteration 9 ---
+ --- Starting Targeted Iteration 10 ---
+
+All 10 iterations finished. Evaluating Data...
+
+===========================================================================
+ TARGETED RAW (POST_OP | STATIC THRESHOLD) - FINAL MULTI-RUN STATISTICAL REPORT
+===========================================================================
+ -> Patient Recall                  : 100.00% (+/- 0.00)
+ -> Zone Recall                     :  67.45% (+/- 1.36)
+ -> Zone Precision                  :  71.92% (+/- 1.76)
+ -> System Accuracy                 :  86.15% (+/- 0.59)
+ -> Mean Npl                        :  38.23% (+/- 1.04)
+ -> Patient Fp                      :   0.30 counts (+/- 0.46)
+ -> Zone Fp                         :  12.40 counts (+/- 1.11)
+ -> Top5 Classification Accuracy    : 100.00% (+/- 0.00)
+ -> Healthy Classification Accuracy :  94.00% (+/- 9.17)
+===========================================================================
+
+
+===========================================================================
+ TARGETED AGGREGATED (POST_OP | STATIC THRESHOLD) - FINAL MULTI-RUN STATISTICAL REPORT
+===========================================================================
+ -> Patient Recall                  :  98.00% (+/- 6.00)
+ -> Zone Recall                     :  97.66% (+/- 1.49)
+ -> Zone Precision                  :  89.59% (+/- 3.82)
+ -> System Accuracy                 :  97.30% (+/- 1.05)
+ -> Mean Npl                        :  69.18% (+/- 2.34)
+ -> Patient Fp                      :   2.30 counts (+/- 0.64)
+ -> Zone Fp                         :   5.40 counts (+/- 2.11)
+ -> Top5 Classification Accuracy    : 100.00% (+/- 0.00)
+ -> Healthy Classification Accuracy :  54.00% (+/- 12.81)
+===========================================================================
+
+
+---------------------------------------------------------------------------
+ TARGETED RAW (POST_OP | STATIC THRESHOLD) - DISEASE-LEVEL BREAKDOWN
+---------------------------------------------------------------------------
+
+   [ PATHOLOGY: DVT_TEMP ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  90.00% (+/- 20.00)
+    -> System Accuracy               :  99.00% (+/- 2.00)
+    -> Mean Npl                      :  50.36% (+/- 6.21)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: ISCHEMIC_BOWEL_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  95.00% (+/- 15.00)
+    -> System Accuracy               :  99.50% (+/- 1.50)
+    -> Mean Npl                      :  32.03% (+/- 3.66)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: MALIGNANT_HYPERTHERMIA_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  29.88% (+/- 1.89)
+    -> System Accuracy               :  41.00% (+/- 5.39)
+    -> Mean Npl                      :  22.70% (+/- 1.61)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: SEPTIC_SHOCK_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   :  63.50% (+/- 3.20)
+    -> Zone Precision                : 100.00% (+/- 0.00)
+    -> System Accuracy               :  63.50% (+/- 3.20)
+    -> Mean Npl                      :  30.76% (+/- 2.87)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: SYSTEMIC_ALKALOSIS_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   :  60.00% (+/- 0.00)
+    -> Zone Precision                : 100.00% (+/- 0.00)
+    -> System Accuracy               :  60.00% (+/- 0.00)
+    -> Mean Npl                      :  52.01% (+/- 1.51)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: HEALTHY ]
+    -> False Alarms (Patients)         : 0.30 (+/- 0.46)
+    -> Spatial Leakage (Zones)         : 0.30 (+/- 0.46)
+    -> System Accuracy                 :  99.70% (+/- 0.46)
+    -> Healthy Classification Accuracy :  94.00% (+/- 9.17)
+
+---------------------------------------------------------------------------
+ TARGETED AGGREGATED (POST_OP | STATIC THRESHOLD) - DISEASE-LEVEL BREAKDOWN
+---------------------------------------------------------------------------
+
+   [ PATHOLOGY: DVT_TEMP ]
+    -> Patient Recall                :  90.00% (+/- 30.00)
+    -> Zone Recall                   :  90.00% (+/- 30.00)
+    -> Zone Precision                :  80.00% (+/- 33.17)
+    -> System Accuracy               :  98.50% (+/- 2.29)
+    -> Mean Npl                      :  44.54% (+/- 20.55)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: ISCHEMIC_BOWEL_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  85.00% (+/- 22.91)
+    -> System Accuracy               :  98.50% (+/- 2.29)
+    -> Mean Npl                      :  50.15% (+/- 7.29)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: MALIGNANT_HYPERTHERMIA_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  87.14% (+/- 9.11)
+    -> System Accuracy               :  96.00% (+/- 3.00)
+    -> Mean Npl                      :  82.40% (+/- 10.56)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: SEPTIC_SHOCK_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   :  97.00% (+/- 3.32)
+    -> Zone Precision                :  97.00% (+/- 3.32)
+    -> System Accuracy               :  97.00% (+/- 3.32)
+    -> Mean Npl                      :  39.90% (+/- 3.31)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: SYSTEMIC_ALKALOSIS_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   :  98.00% (+/- 2.45)
+    -> Zone Precision                :  98.00% (+/- 2.45)
+    -> System Accuracy               :  98.00% (+/- 2.45)
+    -> Mean Npl                      :  97.14% (+/- 1.13)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: HEALTHY ]
+    -> False Alarms (Patients)         : 2.30 (+/- 0.64)
+    -> Spatial Leakage (Zones)         : 3.00 (+/- 1.18)
+    -> System Accuracy                 :  97.00% (+/- 1.18)
+    -> Healthy Classification Accuracy :  54.00% (+/- 12.81)
+
+
+================================================================================
+ === TARGETED STATIC EVALUATION: DIABETES ===
+================================================================================
+
+Starting STATIC THRESHOLD TARGETED COMBINED Test Suite for DIABETES...
+ -> 5 Targeted Pathologies + 5 Matched Healthy Controls
+ -> Executing 10 Stochastic Iterations on 16 cores...
+ --- Starting Targeted Iteration 1 ---
+ --- Starting Targeted Iteration 2 ---
+ --- Starting Targeted Iteration 3 ---
+ --- Starting Targeted Iteration 4 ---
+ --- Starting Targeted Iteration 5 ---
+ --- Starting Targeted Iteration 6 ---
+ --- Starting Targeted Iteration 7 ---
+ --- Starting Targeted Iteration 8 ---
+ --- Starting Targeted Iteration 9 ---
+ --- Starting Targeted Iteration 10 ---
+
+All 10 iterations finished. Evaluating Data...
+
+===========================================================================
+ TARGETED RAW (DIABETES | STATIC THRESHOLD) - FINAL MULTI-RUN STATISTICAL REPORT
+===========================================================================
+ -> Patient Recall                  :  80.00% (+/- 0.00)
+ -> Zone Recall                     :  88.89% (+/- 0.00)
+ -> Zone Precision                  :  53.90% (+/- 11.89)
+ -> System Accuracy                 :  95.70% (+/- 1.76)
+ -> Mean Npl                        :  66.97% (+/- 2.93)
+ -> Patient Fp                      :   0.00 counts (+/- 0.00)
+ -> Zone Fp                         :   7.60 counts (+/- 3.53)
+ -> Top5 Classification Accuracy    :  66.00% (+/- 9.17)
+ -> Healthy Classification Accuracy : 100.00% (+/- 0.00)
+===========================================================================
+
+
+===========================================================================
+ TARGETED AGGREGATED (DIABETES | STATIC THRESHOLD) - FINAL MULTI-RUN STATISTICAL REPORT
+===========================================================================
+ -> Patient Recall                  : 100.00% (+/- 0.00)
+ -> Zone Recall                     : 100.00% (+/- 0.00)
+ -> Zone Precision                  : 100.00% (+/- 0.00)
+ -> System Accuracy                 : 100.00% (+/- 0.00)
+ -> Mean Npl                        :  72.42% (+/- 0.89)
+ -> Patient Fp                      :   0.00 counts (+/- 0.00)
+ -> Zone Fp                         :   0.00 counts (+/- 0.00)
+ -> Top5 Classification Accuracy    : 100.00% (+/- 0.00)
+ -> Healthy Classification Accuracy : 100.00% (+/- 0.00)
+===========================================================================
+
+
+---------------------------------------------------------------------------
+ TARGETED RAW (DIABETES | STATIC THRESHOLD) - DISEASE-LEVEL BREAKDOWN
+---------------------------------------------------------------------------
+
+   [ PATHOLOGY: DKA_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  63.23% (+/- 11.43)
+    -> System Accuracy               :  84.00% (+/- 8.31)
+    -> Mean Npl                      :  80.70% (+/- 3.52)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: ISCHEMIA_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  23.29% (+/- 11.67)
+    -> System Accuracy               :  78.50% (+/- 10.97)
+    -> Mean Npl                      :  37.07% (+/- 4.36)
+    -> Top5 Classification Accuracy  :  30.00% (+/- 45.83)
+
+   [ PATHOLOGY: PYELO_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                : 100.00% (+/- 0.00)
+    -> System Accuracy               : 100.00% (+/- 0.00)
+    -> Mean Npl                      :  52.21% (+/- 3.70)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: RTA_PH ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :  95.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: STROKE_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                :  95.00% (+/- 15.00)
+    -> System Accuracy               :  99.50% (+/- 1.50)
+    -> Mean Npl                      :  42.94% (+/- 2.04)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: HEALTHY ]
+    -> False Alarms (Patients)         : 0.00 (+/- 0.00)
+    -> Spatial Leakage (Zones)         : 0.00 (+/- 0.00)
+    -> System Accuracy                 : 100.00% (+/- 0.00)
+    -> Healthy Classification Accuracy : 100.00% (+/- 0.00)
+
+---------------------------------------------------------------------------
+ TARGETED AGGREGATED (DIABETES | STATIC THRESHOLD) - DISEASE-LEVEL BREAKDOWN
+---------------------------------------------------------------------------
+
+   [ PATHOLOGY: DKA_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                : 100.00% (+/- 0.00)
+    -> System Accuracy               : 100.00% (+/- 0.00)
+    -> Mean Npl                      :  58.88% (+/- 1.93)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: ISCHEMIA_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                : 100.00% (+/- 0.00)
+    -> System Accuracy               : 100.00% (+/- 0.00)
+    -> Mean Npl                      :  94.78% (+/- 6.27)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: PYELO_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                : 100.00% (+/- 0.00)
+    -> System Accuracy               : 100.00% (+/- 0.00)
+    -> Mean Npl                      :  63.96% (+/- 6.79)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: RTA_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                : 100.00% (+/- 0.00)
+    -> System Accuracy               : 100.00% (+/- 0.00)
+    -> Mean Npl                      :  98.59% (+/- 4.07)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: STROKE_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   : 100.00% (+/- 0.00)
+    -> Zone Precision                : 100.00% (+/- 0.00)
+    -> System Accuracy               : 100.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: HEALTHY ]
+    -> False Alarms (Patients)         : 0.00 (+/- 0.00)
+    -> Spatial Leakage (Zones)         : 0.00 (+/- 0.00)
+    -> System Accuracy                 : 100.00% (+/- 0.00)
+    -> Healthy Classification Accuracy : 100.00% (+/- 0.00)
+
+
+================================================================================
+ === TARGETED Z-SCORE EVALUATION: POST_OP ===
+================================================================================
+
+Starting Z-SCORE TARGETED COMBINED Test Suite for POST_OP...
+ -> 5 Targeted Pathologies + 5 Matched Healthy Controls
+ -> Executing 10 Stochastic Iterations on 16 cores...
+ --- Starting Targeted Iteration 1 ---
+ --- Starting Targeted Iteration 2 ---
+ --- Starting Targeted Iteration 3 ---
+ --- Starting Targeted Iteration 4 ---
+ --- Starting Targeted Iteration 5 ---
+ --- Starting Targeted Iteration 6 ---
+ --- Starting Targeted Iteration 7 ---
+ --- Starting Targeted Iteration 8 ---
+ --- Starting Targeted Iteration 9 ---
+ --- Starting Targeted Iteration 10 ---
+
+All 10 iterations finished. Evaluating Data...
+
+===========================================================================
+ TARGETED RAW (POST_OP | Z-SCORE) - FINAL MULTI-RUN STATISTICAL REPORT
+===========================================================================
+ -> Patient Recall                  :  62.00% (+/- 14.00)
+ -> Zone Recall                     :  12.98% (+/- 2.93)
+ -> Zone Precision                  :   3.21% (+/- 0.70)
+ -> System Accuracy                 :   8.05% (+/- 0.91)
+ -> Mean Npl                        :  22.86% (+/- 6.25)
+ -> Patient Fp                      :   6.90 counts (+/- 0.70)
+ -> Zone Fp                         : 183.90 counts (+/- 1.81)
+ -> Top5 Classification Accuracy    :  60.00% (+/- 0.00)
+ -> Healthy Classification Accuracy :   0.00% (+/- 0.00)
+===========================================================================
+
+
+===========================================================================
+ TARGETED AGGREGATED (POST_OP | Z-SCORE) - FINAL MULTI-RUN STATISTICAL REPORT
+===========================================================================
+ -> Patient Recall                  :   0.00% (+/- 0.00)
+ -> Zone Recall                     :   0.00% (+/- 0.00)
+ -> Zone Precision                  :   0.00% (+/- 0.00)
+ -> System Accuracy                 :   0.00% (+/- 0.00)
+ -> Mean Npl                        : 100.00% (+/- 0.00)
+ -> Patient Fp                      :   8.00 counts (+/- 0.00)
+ -> Zone Fp                         : 200.00 counts (+/- 0.00)
+ -> Top5 Classification Accuracy    :  60.00% (+/- 0.00)
+ -> Healthy Classification Accuracy :   0.00% (+/- 0.00)
+===========================================================================
+
+
+---------------------------------------------------------------------------
+ TARGETED RAW (POST_OP | Z-SCORE) - DISEASE-LEVEL BREAKDOWN
+---------------------------------------------------------------------------
+
+   [ PATHOLOGY: DVT_TEMP ]
+    -> Patient Recall                :  80.00% (+/- 40.00)
+    -> Zone Recall                   :  80.00% (+/- 40.00)
+    -> Zone Precision                :   4.28% (+/- 2.15)
+    -> System Accuracy               :  11.00% (+/- 4.90)
+    -> Mean Npl                      :  38.25% (+/- 32.29)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: ISCHEMIC_BOWEL_COMBINED ]
+    -> Patient Recall                :  10.00% (+/- 30.00)
+    -> Zone Recall                   :  10.00% (+/- 30.00)
+    -> Zone Precision                :   0.53% (+/- 1.58)
+    -> System Accuracy               :   4.00% (+/- 3.00)
+    -> Mean Npl                      :  90.66% (+/- 28.03)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: MALIGNANT_HYPERTHERMIA_COMBINED ]
+    -> Patient Recall                :  20.00% (+/- 40.00)
+    -> Zone Recall                   :   6.00% (+/- 12.81)
+    -> Zone Precision                :   1.50% (+/- 3.20)
+    -> System Accuracy               :   1.50% (+/- 3.20)
+    -> Mean Npl                      :  84.42% (+/- 31.29)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: SEPTIC_SHOCK_COMBINED ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   :  10.00% (+/- 3.87)
+    -> Zone Precision                :  10.00% (+/- 3.87)
+    -> System Accuracy               :  10.00% (+/- 3.87)
+    -> Mean Npl                      :  19.16% (+/- 12.67)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: SYSTEMIC_ALKALOSIS_PH ]
+    -> Patient Recall                : 100.00% (+/- 0.00)
+    -> Zone Recall                   :  14.50% (+/- 4.15)
+    -> Zone Precision                :  14.50% (+/- 4.15)
+    -> System Accuracy               :  14.50% (+/- 4.15)
+    -> Mean Npl                      :  25.39% (+/- 5.44)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: HEALTHY ]
+    -> False Alarms (Patients)         : 5.00 (+/- 0.00)
+    -> Spatial Leakage (Zones)         : 92.10 (+/- 2.39)
+    -> System Accuracy                 :   7.90% (+/- 2.39)
+    -> Healthy Classification Accuracy :   0.00% (+/- 0.00)
+
+---------------------------------------------------------------------------
+ TARGETED AGGREGATED (POST_OP | Z-SCORE) - DISEASE-LEVEL BREAKDOWN
+---------------------------------------------------------------------------
+
+   [ PATHOLOGY: DVT_TEMP ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: ISCHEMIC_BOWEL_COMBINED ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: MALIGNANT_HYPERTHERMIA_COMBINED ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: SEPTIC_SHOCK_COMBINED ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: SYSTEMIC_ALKALOSIS_PH ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: HEALTHY ]
+    -> False Alarms (Patients)         : 5.00 (+/- 0.00)
+    -> Spatial Leakage (Zones)         : 100.00 (+/- 0.00)
+    -> System Accuracy                 :   0.00% (+/- 0.00)
+    -> Healthy Classification Accuracy :   0.00% (+/- 0.00)
+
+
+================================================================================
+ === TARGETED Z-SCORE EVALUATION: DIABETES ===
+================================================================================
+
+Starting Z-SCORE TARGETED COMBINED Test Suite for DIABETES...
+ -> 5 Targeted Pathologies + 5 Matched Healthy Controls
+ -> Executing 10 Stochastic Iterations on 16 cores...
+ --- Starting Targeted Iteration 1 ---
+ --- Starting Targeted Iteration 2 ---
+ --- Starting Targeted Iteration 3 ---
+ --- Starting Targeted Iteration 4 ---
+ --- Starting Targeted Iteration 5 ---
+ --- Starting Targeted Iteration 6 ---
+ --- Starting Targeted Iteration 7 ---
+ --- Starting Targeted Iteration 8 ---
+ --- Starting Targeted Iteration 9 ---
+ --- Starting Targeted Iteration 10 ---
+
+All 10 iterations finished. Evaluating Data...
+
+===========================================================================
+ TARGETED RAW (DIABETES | Z-SCORE) - FINAL MULTI-RUN STATISTICAL REPORT
+===========================================================================
+ -> Patient Recall                  :  22.00% (+/- 16.61)
+ -> Zone Recall                     :  12.22% (+/- 9.23)
+ -> Zone Precision                  :   0.57% (+/- 0.43)
+ -> System Accuracy                 :   4.00% (+/- 1.50)
+ -> Mean Npl                        :  43.69% (+/- 37.73)
+ -> Patient Fp                      :   8.90 counts (+/- 0.83)
+ -> Zone Fp                         : 192.00 counts (+/- 3.00)
+ -> Top5 Classification Accuracy    :  20.00% (+/- 0.00)
+ -> Healthy Classification Accuracy :   0.00% (+/- 0.00)
+===========================================================================
+
+
+===========================================================================
+ TARGETED AGGREGATED (DIABETES | Z-SCORE) - FINAL MULTI-RUN STATISTICAL REPORT
+===========================================================================
+ -> Patient Recall                  :   0.00% (+/- 0.00)
+ -> Zone Recall                     :   0.00% (+/- 0.00)
+ -> Zone Precision                  :   0.00% (+/- 0.00)
+ -> System Accuracy                 :   0.00% (+/- 0.00)
+ -> Mean Npl                        : 100.00% (+/- 0.00)
+ -> Patient Fp                      :  10.00 counts (+/- 0.00)
+ -> Zone Fp                         : 200.00 counts (+/- 0.00)
+ -> Top5 Classification Accuracy    :  20.00% (+/- 0.00)
+ -> Healthy Classification Accuracy :   0.00% (+/- 0.00)
+===========================================================================
+
+
+---------------------------------------------------------------------------
+ TARGETED RAW (DIABETES | Z-SCORE) - DISEASE-LEVEL BREAKDOWN
+---------------------------------------------------------------------------
+
+   [ PATHOLOGY: DKA_PH ]
+    -> Patient Recall                :  30.00% (+/- 45.83)
+    -> Zone Recall                   :   6.00% (+/- 9.17)
+    -> Zone Precision                :   1.50% (+/- 2.29)
+    -> System Accuracy               :   1.50% (+/- 2.29)
+    -> Mean Npl                      :  80.44% (+/- 31.25)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: ISCHEMIA_COMBINED ]
+    -> Patient Recall                :  50.00% (+/- 50.00)
+    -> Zone Recall                   :  50.00% (+/- 50.00)
+    -> Zone Precision                :   2.50% (+/- 2.50)
+    -> System Accuracy               :   2.50% (+/- 2.50)
+    -> Mean Npl                      :  59.32% (+/- 40.96)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: PYELO_COMBINED ]
+    -> Patient Recall                :  20.00% (+/- 40.00)
+    -> Zone Recall                   :  20.00% (+/- 40.00)
+    -> Zone Precision                :   1.03% (+/- 2.05)
+    -> System Accuracy               :   4.50% (+/- 5.22)
+    -> Mean Npl                      :  82.98% (+/- 34.05)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: RTA_PH ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   4.50% (+/- 4.15)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: STROKE_PH ]
+    -> Patient Recall                :  10.00% (+/- 30.00)
+    -> Zone Recall                   :  10.00% (+/- 30.00)
+    -> Zone Precision                :   0.53% (+/- 1.58)
+    -> System Accuracy               :   3.50% (+/- 4.50)
+    -> Mean Npl                      :  91.14% (+/- 26.58)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: HEALTHY ]
+    -> False Alarms (Patients)         : 5.00 (+/- 0.00)
+    -> Spatial Leakage (Zones)         : 95.30 (+/- 2.37)
+    -> System Accuracy                 :   4.70% (+/- 2.37)
+    -> Healthy Classification Accuracy :   0.00% (+/- 0.00)
+
+---------------------------------------------------------------------------
+ TARGETED AGGREGATED (DIABETES | Z-SCORE) - DISEASE-LEVEL BREAKDOWN
+---------------------------------------------------------------------------
+
+   [ PATHOLOGY: DKA_PH ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  : 100.00% (+/- 0.00)
+
+   [ PATHOLOGY: ISCHEMIA_COMBINED ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: PYELO_COMBINED ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: RTA_PH ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: STROKE_PH ]
+    -> Patient Recall                :   0.00% (+/- 0.00)
+    -> Zone Recall                   :   0.00% (+/- 0.00)
+    -> Zone Precision                :   0.00% (+/- 0.00)
+    -> System Accuracy               :   0.00% (+/- 0.00)
+    -> Mean Npl                      : 100.00% (+/- 0.00)
+    -> Top5 Classification Accuracy  :   0.00% (+/- 0.00)
+
+   [ PATHOLOGY: HEALTHY ]
+    -> False Alarms (Patients)         : 5.00 (+/- 0.00)
+    -> Spatial Leakage (Zones)         : 100.00 (+/- 0.00)
+    -> System Accuracy                 :   0.00% (+/- 0.00)
+    -> Healthy Classification Accuracy :   0.00% (+/- 0.00)
