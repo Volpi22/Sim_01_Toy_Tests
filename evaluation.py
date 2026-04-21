@@ -238,7 +238,7 @@ class FinalPerformanceEvaluator:
         metrics = {
             'patient_recall': [], 'zone_recall': [], 
             'zone_precision': [], 'mean_npl': [],
-            'patient_fp': [], 'zone_fp': []
+            'patient_fp': [], 'zone_fp': [], 'system_accuracy': []
         }
 
         for results_list in all_runs_results:
@@ -255,7 +255,7 @@ class FinalPerformanceEvaluator:
             std_val = np.std(v)
             
             display_name = k.replace('_', ' ').title()
-            unit = "%" if any(x in k for x in ["recall", "precision", "npl"]) else "counts"
+            unit = "%" if any(x in k for x in ["accuracy", "recall", "precision", "npl"]) else "counts"
             
             mult = 100.0 if unit == "%" else 1.0
             print(f" -> {display_name}: {mean_val*mult:.2f}{unit} (+/- {std_val*mult:.2f})")
@@ -289,7 +289,7 @@ class FinalPerformanceEvaluator:
             metrics = {
                 'patient_recall': [], 'zone_recall': [], 
                 'zone_precision': [], 'mean_npl': [],
-                'patient_fp': [], 'zone_fp': []
+                'patient_fp': [], 'zone_fp': [], 'system_accuracy': []
             }
 
             for run_results in all_runs_results:
@@ -306,8 +306,11 @@ class FinalPerformanceEvaluator:
             if d_key == 'healthy':
                 m_pat_fp, s_pat_fp = np.mean(metrics['patient_fp']), np.std(metrics['patient_fp'])
                 m_zon_fp, s_zon_fp = np.mean(metrics['zone_fp']), np.std(metrics['zone_fp'])
+                m_acc, s_acc = np.mean(metrics['system_accuracy']), np.std(metrics['system_accuracy'])
+                
                 print(f"    -> False Alarms (Patients) : {m_pat_fp:.2f} (+/- {s_pat_fp:.2f})")
                 print(f"    -> Spatial Leakage (Zones) : {m_zon_fp:.2f} (+/- {s_zon_fp:.2f})")
+                print(f"    -> System Accuracy         : {m_acc*100.0:>6.2f}% (+/- {s_acc*100.0:.2f})")
             else:
                 # For diseases, print the full diagnostic breakdown
                 for k, v in metrics.items():
@@ -317,7 +320,9 @@ class FinalPerformanceEvaluator:
                     mean_val = np.mean(v)
                     std_val = np.std(v)
                     display_name = k.replace('_', ' ').title()
-                    unit = "%" if any(x in k for x in ["recall", "precision", "npl"]) else " counts"
+                    
+                    # Ensure 'accuracy' is recognized here as well
+                    unit = "%" if any(x in k for x in ["recall", "precision", "npl", "accuracy"]) else " counts"
                     mult = 100.0 if unit == "%" else 1.0
                     
                     print(f"    -> {display_name:<25}: {mean_val*mult:>6.2f}{unit} (+/- {std_val*mult:.2f})")
@@ -325,12 +330,11 @@ class FinalPerformanceEvaluator:
     def _get_scalars(self, results_list):
         """
         Internal mathematical engine to extract scalar metrics from a list of results.
-        
-        @param results_list (list): Raw detection dictionaries.
-        @return dict: Calculated recall, precision, and latency scalars.
         """
         patient_tp, patient_fp, patient_fn = 0, 0, 0
         zone_tp, zone_fp, zone_fn = 0, 0, 0
+        zone_tn = 0
+        total_eval_zones = 0 
         npl_list = []
 
         for res in results_list:
@@ -341,9 +345,11 @@ class FinalPerformanceEvaluator:
 
             # Scenario 1: Healthy Controls
             if not target_zones or target_zones == [-1]:  
-                if len(det_times) > 0:
-                    patient_fp += 1
-                    zone_fp += len(det_times)
+                fp_count = len(det_times)
+                patient_fp += 1 if fp_count > 0 else 0
+                zone_fp += fp_count
+                zone_tn += (20 - fp_count)  # The rest were correctly identified as healthy
+                total_eval_zones += 20
                 continue
 
             # Scenario 2: Diseased Patients
@@ -365,23 +371,32 @@ class FinalPerformanceEvaluator:
                 else:
                     zone_fn += 1
 
-            if patient_hit: patient_tp += 1
-            else: patient_fn += 1
+            if patient_hit: 
+                patient_tp += 1
+            else: 
+                patient_fn += 1
 
-            # Calculate spatial leakage
+            # Calculate spatial leakage (False Positives in healthy zones)
             leakage = len([z for z in det_times.keys() if z not in target_zones])
             zone_fp += leakage
-            if leakage > 0 and not patient_hit: patient_fp += 1 
+            
+            # Calculate True Negatives (Healthy zones that were correctly ignored)
+            # Total zones (20) minus the diseased zones, minus the ones we falsely triggered on
+            zone_tn += (20 - len(target_zones)) - leakage
+            total_eval_zones += 20
+            
+            if leakage > 0 and not patient_hit: 
+                patient_fp += 1 
 
         return {
             'patient_recall': patient_tp / (patient_tp + patient_fn) if (patient_tp + patient_fn) > 0 else 0,
             'zone_recall': zone_tp / (zone_tp + zone_fn) if (zone_tp + zone_fn) > 0 else 0,
             'zone_precision': zone_tp / (zone_tp + zone_fp) if (zone_tp + zone_fp) > 0 else 0,
+            'system_accuracy': (zone_tp + zone_tn) / total_eval_zones if total_eval_zones > 0 else 0, # NEW METRIC
             'mean_npl': np.mean(npl_list) if npl_list else 1.0,
             'patient_fp': patient_fp,
             'zone_fp': zone_fp
         }
-
 # ==========================================
 # COMPREHENSIVE TEST SUITE (PARALLELIZED)
 # ==========================================
