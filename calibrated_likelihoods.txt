@@ -1,0 +1,14 @@
+CALIBRATED_LIKELIHOODS = \
+{'generalized': {'static': {'raw': {'tpr': 0.99451, 'fpr': 0.15175},
+                            'agg': {'tpr': 0.99451, 'fpr': 0.12976}},
+                 'zscore': {'raw': {'tpr': 0.46154, 'fpr': 0.80619},
+                            'agg': {'tpr': 0.07143, 'fpr': 0.97481}}},
+ 'post_op': {'static': {'raw': {'tpr': 0.95455, 'fpr': 0.24685},
+                        'agg': {'tpr': 0.95455, 'fpr': 0.23006}},
+             'zscore': {'raw': {'tpr': 0.13636, 'fpr': 0.95375},
+                        'agg': {'tpr': 0.04545, 'fpr': 0.99958}}},
+ 'diabetes': {'static': {'raw': {'tpr': 0.97619, 'fpr': 0.04417},
+                         'agg': {'tpr': 0.97619, 'fpr': 0.00128}},
+              'zscore': {'raw': {'tpr': 0.21429, 'fpr': 0.97428},
+                         'agg': {'tpr': 0.02381, 'fpr': 0.99938}}}}
+
