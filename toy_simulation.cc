@@ -27,7 +27,7 @@ int
 main (int argc, char *argv[])
 {
   int numOfNanobots = 64;
-  int simulationDuration = 86400;
+  int simulationDuration = 604800;
   int injectionVessel = 15;          
 
   CommandLine cmd;
