@@ -23,35 +23,41 @@ class DigitalPatientEngine:
     def step_pharmacokinetics(self, infusion_rate_pct, dt_minutes=1.0, injection_zone=20, cardiac_multiplier=1.0):
         """
         Euler integration step for the mass-balance equation with dynamic heart rate.
+        Uses micro-stepping to prevent numerical instability (exploding gradients) in small organs.
         """
-        # 1. Apply Toxicity-Induced Hemodynamic Shift
         Q_dynamic = self.Q_base * cardiac_multiplier
         
-        dC_dt = np.zeros(21)
+        # Break the 1-minute AI step into 60 smaller physics micro-steps (seconds)
+        micro_steps = 60
+        dt = dt_minutes / micro_steps
         
-        for i in range(1, 21):
-            # Advection uses the dynamically scaled Q matrix
-            inflow = sum(Q_dynamic[j, i] * self.C[j] for j in range(1, 21))
-            outflow = sum(Q_dynamic[i, j] * self.C[i] for j in range(1, 21))
+        for _ in range(micro_steps):
+            dC_dt = np.zeros(21)
             
-            # Elimination only in the specific clearance zone
-            elimination = 0
-            if i == self.drug['clearance_zone']:
-                elimination = self.drug['k_elim'] * self.C[i] * self.V[i]
+            for i in range(1, 21):
+                # Advection uses the dynamically scaled Q matrix
+                inflow = sum(Q_dynamic[j, i] * self.C[j] for j in range(1, 21))
+                outflow = sum(Q_dynamic[i, j] * self.C[i] for j in range(1, 21))
                 
-            source = infusion_rate_pct if i == injection_zone else 0
+                # Elimination only in the specific clearance zone
+                elimination = 0
+                if i == self.drug['clearance_zone']:
+                    elimination = self.drug['k_elim'] * self.C[i] * self.V[i]
+                    
+                source = infusion_rate_pct if i == injection_zone else 0
+                
+                # Mass balance equation
+                dC_dt[i] = (inflow - outflow - elimination + source) / self.V[i]
+                
+            # Update Plasma Concentration safely via micro-step
+            self.C += dC_dt * dt
+            self.C = np.clip(self.C, 0, None)
             
-            dC_dt[i] = (inflow - outflow - elimination + source) / self.V[i]
+            # Update Effect-Site Concentration (Pharmacodynamic Delay) safely
+            dCe_dt = self.k_e0 * (self.C - self.Ce)
+            self.Ce += dCe_dt * dt
+            self.Ce = np.clip(self.Ce, 0, None)
             
-        # 2. Update Plasma Concentration
-        self.C += dC_dt * dt_minutes
-        self.C = np.clip(self.C, 0, None)
-        
-        # 3. Update Effect-Site Concentration (Pharmacodynamic Delay)
-        dCe_dt = self.k_e0 * (self.C - self.Ce)
-        self.Ce += dCe_dt * dt_minutes
-        self.Ce = np.clip(self.Ce, 0, None)
-        
         return self.C
 
     def apply_pharmacodynamics(self, base_ph_array, base_temp_array):

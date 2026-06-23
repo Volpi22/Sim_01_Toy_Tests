@@ -20,9 +20,22 @@ class PredictiveChemoEnv(gym.Env):
         self.drug_name = drug_name
         self.tumor_zone = tumor_zone
         
-        # Action Space: [0.90, 0.95, 1.0, 1.05, 1.10] of nominal dose
-        self.action_space = spaces.Discrete(5)
-        self.action_mapping = {0: 0.90, 1: 0.95, 2: 1.0, 3: 1.05, 4: 1.10}
+        # --- HYBRID ACTION SPACE ---
+        # 0-3: Broad strokes for emergencies and stabilization
+        # 4-9: Fine-tuned increments for precision targeting
+        self.action_space = spaces.Discrete(10)
+        self.action_mapping = {
+            0: 0.00,  # Emergency Stop (Pause Infusion)
+            1: 0.25,  # Quarter Dose
+            2: 0.50,  # Half Dose
+            3: 0.75,  # Three-Quarter Dose
+            4: 0.85,  # Precision adjustments...
+            5: 0.90,
+            6: 0.95,
+            7: 1.00,  # Nominal Prescribed Dose
+            8: 1.05,
+            9: 1.10
+        }
         
         # State Space: A single minute's telemetry packet (43-D array)
         # Features: [pH(20), Temp(20), Toxicity(1), Dose(1), Confidence_Flag(1)]
@@ -31,8 +44,22 @@ class PredictiveChemoEnv(gym.Env):
         self.max_steps = 240 
         self.critical_toxicity_threshold = 50.0
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        
+        # --- DOMAIN RANDOMIZATION ---
+        # Randomizes the patient's metabolic clearance rate by +/- 20%
+        # A value of 0.80 means sluggish kidneys; 1.20 means highly efficient clearance.
+        self.patient_clearance_factor = np.random.uniform(0.80, 1.20)
+        
         self.engine = DigitalPatientEngine(drug_name=self.drug_name)
+        
+        # --- DIRECT PARAMETER INJECTION ---
+        # Mutates the engine's copy of the drug constants for this episode's specific patient.
+        # This keeps domain randomization intact without changing simulation.py's method signatures.
+        if hasattr(self.engine, 'drug') and 'k_elim' in self.engine.drug:
+            self.engine.drug['k_elim'] *= self.patient_clearance_factor
+        
         self.current_step = 0
         self.total_toxicity = 0.0
         self.current_dose = 1.0 
@@ -56,7 +83,7 @@ class PredictiveChemoEnv(gym.Env):
         self.mu_B_ph = np.nanmedian(baseline_ph_buffer, axis=0)
         self.mu_B_temp = np.nanmedian(baseline_temp_buffer, axis=0)
 
-        # --- NEW: Inject the Warburg Effect (Pathology) ---
+        # Inject the Warburg Effect (Pathology) ---
         self.disease_ph_offset = np.zeros(20)
         self.disease_temp_offset = np.zeros(20)
         
@@ -90,8 +117,7 @@ class PredictiveChemoEnv(gym.Env):
         
         # Traceable Explanatory Wrapper
         if new_dose < self.current_dose:
-            print(f"[CLINICAL ALERT] Minute {self.current_step}: AI Controller reduced infusion to {new_dose*100}%.")
-            print(f"-> Rationale: Sequential trajectory analysis indicates predictive acceleration toward toxicity bounds.")
+            print(f"[ALERT] Minute {self.current_step}: Reduced infusion to {new_dose*100}%.")
         
         self.current_dose = new_dose
         
@@ -100,6 +126,7 @@ class PredictiveChemoEnv(gym.Env):
         cardiac_multiplier = 1.0 + stress_factor
         
         # Step Physics Engine (1 minute)
+        # Signature restored to its original native form
         self.engine.step_pharmacokinetics(self.current_dose, cardiac_multiplier=cardiac_multiplier)
         
         data_idx = 15 + self.current_step

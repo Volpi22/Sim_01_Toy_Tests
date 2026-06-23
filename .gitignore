@@ -17,3 +17,5 @@ optuna_study_target_diabetes_combined.db
 optuna_study_target_zscore_post_op_combined.db
 optuna_study_target_zscore_diabetes_combined.db
 ns3_1_week_log.txt
+models
+results

@@ -1,16 +1,37 @@
 """
-=============================================================================
-Therapeutic Thermostat: Native PyTorch DRQN Training Hub
+This script handles the training and automated hyperparameter optimization 
+of Deep Recurrent Q-Network agents.
+
+COMMAND-LINE ARGUMENTS:
+    --cancer     : Name of the specific cancer profile to train. 
+    --all        : Flag to train all 5 specialists sequentially.
+    --episodes   : Number of episodes to train each agent. (Default: 1500)
+    --optimize   : Flag to launch Optuna Hyperparameter Optimization.
+    --n_trials   : Number of Optuna trials to run if optimizing. (Default: 30)
+
+USAGE EXAMPLES:
+1. Standard Training (Uses default or best known parameters):
+   $ python3 train.py --cancer Hepatocellular_Carcinoma --episodes 1500
+   
+2. Hyperparameter Optimization (Finds the best parameters automatically):
+   $ python3 train.py --cancer Glioblastoma --optimize --n_trials 30
 =============================================================================
 """
 
 import os
 import random
 import argparse
+import numpy as np
+from collections import deque
+
 import torch
+torch.set_num_threads(torch.get_num_threads())
 import torch.nn as nn
 import torch.optim as optim
-import numpy as np
+
+# Import Optuna for Bayesian Hyperparameter Optimization
+import optuna
+
 from environment import PredictiveChemoEnv
 
 CANCER_PROFILES = {
@@ -23,24 +44,18 @@ CANCER_PROFILES = {
 
 class DRQN(nn.Module):
     """Deep Recurrent Q-Network Architecture for Multi-Rate Signal Fusion."""
-    def __init__(self, input_dim=43, num_actions=5, hidden_dim=256):
+    def __init__(self, input_dim=43, num_actions=10, hidden_dim=256):
         super(DRQN, self).__init__()
         self.hidden_dim = hidden_dim
         
-        # Dense feature encoder network
         self.feature_network = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU()
         )
-        
-        # Recurrent Core Core (LSTM)
         self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
-        
-        # Q-value output layer
         self.q_head = nn.Linear(hidden_dim, num_actions)
 
     def forward(self, x, hidden_state=None):
-        # x shape: (batch_size, sequence_length, input_dim)
         batch_size, seq_len, _ = x.size()
         
         flat_x = x.contiguous().view(batch_size * seq_len, -1)
@@ -52,7 +67,7 @@ class DRQN(nn.Module):
         return q_values, hidden_state
 
 class EpisodeReplayBuffer:
-    """Sequential buffer to preserve sequential chronological tracking data."""
+    """Sequential buffer to preserve chronological tracking data."""
     def __init__(self, capacity=1000):
         self.capacity = capacity
         self.buffer = []
@@ -68,25 +83,31 @@ class EpisodeReplayBuffer:
     def __len__(self):
         return len(self.buffer)
 
-def train_drqn_specialist(cancer_name, data_path, total_episodes=400, batch_size=16, gamma=0.99):
-    print(f"\n{'='*60}")
-    print(f" INITIALIZING RECURRENT TRAINING (DRQN): {cancer_name}")
-    print(f" Drug: {CANCER_PROFILES[cancer_name]['drug']} | Target Zone: {CANCER_PROFILES[cancer_name]['zone']}")
-    print(f"{'='*60}\n")
-
-    env = PredictiveChemoEnv(schedule_parquet_path=data_path, drug_name=CANCER_PROFILES[cancer_name]['drug'], tumor_zone=CANCER_PROFILES[cancer_name]['zone'])
+def train_drqn_specialist(cancer_name, data_path, total_episodes=1500, 
+                          batch_size=16, gamma=0.99, lr=1e-3, epsilon_decay=0.99, 
+                          save_model=True, trial=None):
+    """
+    Core training loop. If 'trial' is provided, it acts as an Optuna evaluation 
+    run and enables early pruning.
+    """
+    env = PredictiveChemoEnv(
+        schedule_parquet_path=data_path, 
+        drug_name=CANCER_PROFILES[cancer_name]['drug'], 
+        tumor_zone=CANCER_PROFILES[cancer_name]['zone']
+    )
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    policy_net = DRQN(input_dim=43, num_actions=5).to(device)
-    target_net = DRQN(input_dim=43, num_actions=5).to(device)
+    policy_net = DRQN(input_dim=43, num_actions=10).to(device)
+    target_net = DRQN(input_dim=43, num_actions=10).to(device)
     target_net.load_state_dict(policy_net.state_dict())
     
-    optimizer = optim.Adam(policy_net.parameters(), lr=1e-3)
+    optimizer = optim.Adam(policy_net.parameters(), lr=lr)
     buffer = EpisodeReplayBuffer(capacity=500)
     
     epsilon = 1.0
     epsilon_min = 0.05
-    epsilon_decay = 0.95
+    
+    recent_rewards = deque(maxlen=20)
     
     for episode_idx in range(total_episodes):
         obs, _ = env.reset()
@@ -100,7 +121,6 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=400, batch_size
         while not (terminated or truncated):
             obs_tensor = torch.FloatTensor(obs).view(1, 1, -1).to(device)
             
-            # Action Selection via Epsilon-Greedy
             if random.random() < epsilon:
                 action = env.action_space.sample()
             else:
@@ -115,6 +135,7 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=400, batch_size
             episode_reward += reward
 
         buffer.push(episode_history)
+        recent_rewards.append(episode_reward)
         epsilon = max(epsilon_min, epsilon * epsilon_decay)
         
         # DRQN Sequence Optimization Step
@@ -124,7 +145,6 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=400, batch_size
             
             loss = 0
             for seq in samples:
-                # Construct sequential batches chronologically
                 states = torch.FloatTensor(np.array([t[0] for t in seq])).unsqueeze(0).to(device)
                 actions = torch.LongTensor(np.array([t[1] for t in seq])).unsqueeze(0).unsqueeze(-1).to(device)
                 rewards = torch.FloatTensor(np.array([t[2] for t in seq])).unsqueeze(0).to(device)
@@ -143,28 +163,128 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=400, batch_size
             loss.backward()
             optimizer.step()
             
+        # Unmuted Logging: Print progress every 10 episodes for BOTH optimization and final training
         if episode_idx % 10 == 0:
             target_net.load_state_dict(policy_net.state_dict())
-            print(f"Episode {episode_idx} | Return Score: {episode_reward:.2f} | Exploration Epsilon: {epsilon:.2f}")
+            
+            # Format label to easily identify what phase we are in
+            phase_label = f"[Trial {trial.number}]" if trial is not None else "[Main Training]"
+            print(f"{phase_label} Episode {episode_idx}/{total_episodes} | Return Score: {episode_reward:.2f} | Exploration Epsilon: {epsilon:.2f}")
+        
+        # Optuna Pruning Integration: Abort this trial if the AI is doing terribly
+        if trial is not None:
+            trial.report(episode_reward, episode_idx)
+            if trial.should_prune():
+                print(f"[Trial {trial.number}] PRUNED: Agent failed to learn quickly enough. Moving to next trial.")
+                raise optuna.exceptions.TrialPruned()
 
-    os.makedirs("models", exist_ok=True)
-    torch.save(policy_net.state_dict(), f"models/{cancer_name}_recurrent_drqn.pt")
-    print(f"\n[SUCCESS] Recurrent Specialist saved to models/{cancer_name}_recurrent_drqn.pt\n")
+    # Save the model if this is a standard training run (or the final retrain of an HPO run)
+    if save_model:
+        os.makedirs("models", exist_ok=True)
+        save_path = f"models/{cancer_name}_recurrent_drqn.pt"
+        torch.save(policy_net.state_dict(), save_path)
+        print(f"\n[SUCCESS] Recurrent Specialist saved to {save_path}\n")
+
+    # Return the average performance of the fully trained agent
+    return np.mean(recent_rewards) if len(recent_rewards) > 0 else episode_reward
+
+
+def optimize_specialist(cancer_name, data_path, n_trials=30, total_episodes=1000):
+    """Optuna Study: intelligently searches for the best parameters."""
+    print(f"\n{'='*60}")
+    print(f" LAUNCHING OPTUNA HYPERPARAMETER OPTIMIZATION: {cancer_name}")
+    print(f" Trials: {n_trials} | Episodes per Trial: {total_episodes}")
+    print(f"{'='*60}\n")
+
+    def objective(trial):
+        # 1. Define the search space for Optuna
+        lr = trial.suggest_float("lr", 1e-5, 5e-3, log=True)
+        gamma = trial.suggest_float("gamma", 0.90, 0.995)
+        batch_size = trial.suggest_categorical("batch_size", [8, 16, 32])
+        
+        # Calculate optimal decay so epsilon hits 0.05 at 80% of total_episodes
+        target_episode = int(0.8 * total_episodes)
+        dynamic_decay = (0.05) ** (1.0 / target_episode)
+        
+        # Header for visibility at the start of every trial
+        print(f"\n>>> STARTING TRIAL {trial.number} <<<")
+        print(f"Testing Parameters -> LR: {lr:.5f} | Gamma: {gamma:.4f} | Batch Size: {batch_size} | Eps Decay: {dynamic_decay:.4f}")
+        print("-" * 60)
+        
+        # 2. Run training with these suggested parameters
+        score = train_drqn_specialist(
+            cancer_name=cancer_name, 
+            data_path=data_path,
+            total_episodes=total_episodes,
+            batch_size=batch_size,
+            gamma=gamma,
+            lr=lr,
+            epsilon_decay=dynamic_decay,
+            save_model=False,
+            trial=trial
+        )
+        return score
+
+    # Create and run the study
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=n_trials)
+
+    print("\n[OPTIMIZATION COMPLETE]")
+    print(f"Best Trial: {study.best_trial.number}")
+    print("Best Parameters:")
+    for key, value in study.best_params.items():
+        print(f"    {key}: {value}")
+        
+    # Recalculate the proper decay for the final 1500-episode run
+    final_episodes = 1500
+    final_decay = (0.05) ** (1.0 / int(0.8 * final_episodes))
+        
+    print("\n" + "="*60)
+    print(f" RETRAINING FINAL AGENT WITH OPTIMAL PARAMETERS")
+    print(f" Episodes: {final_episodes}")
+    print("="*60 + "\n")
+    
+    train_drqn_specialist(
+        cancer_name=cancer_name,
+        data_path=data_path,
+        total_episodes=final_episodes,
+        batch_size=study.best_params["batch_size"],
+        gamma=study.best_params["gamma"],
+        lr=study.best_params["lr"],
+        epsilon_decay=final_decay,
+        save_model=True
+    )
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train AI Recurrent Specialists for Chemotherapy Control")
-    parser.add_argument("--cancer", type=str, choices=list(CANCER_PROFILES.keys()), help="Train a single specific recurrent profile.")
+    parser = argparse.ArgumentParser(description="Train or Optimize AI Recurrent Specialists")
+    parser.add_argument("--cancer", type=str, choices=list(CANCER_PROFILES.keys()), help="Target clinical profile.")
     parser.add_argument("--all", action="store_true", help="Sequential batch training flag.")
+    parser.add_argument("--episodes", type=int, default=1500, help="Episodes per training run.")
+    parser.add_argument("--optimize", action="store_true", help="Run Optuna Hyperparameter Optimization.")
+    parser.add_argument("--n_trials", type=int, default=30, help="Number of Optuna trials to test.")
     args = parser.parse_args()
 
     dataset_path = "datasets/1_week_sampling_schedule.parquet"
     if not os.path.exists(dataset_path):
         raise FileNotFoundError(f"Missing dataset at {dataset_path}. Run dataset_generation.py first.")
 
-    if args.all:
-        for name in CANCER_PROFILES.keys():
-            train_drqn_specialist(name, dataset_path)
-    elif args.cancer:
-        train_drqn_specialist(args.cancer, dataset_path)
+    # Execute Optuna Tuning
+    if args.optimize:
+        if args.cancer:
+            optimize_specialist(args.cancer, dataset_path, n_trials=args.n_trials)
+        elif args.all:
+            for name in CANCER_PROFILES.keys():
+                optimize_specialist(name, dataset_path, n_trials=args.n_trials)
+        else:
+            print("Please specify --cancer [name] or --all to run optimization.")
+            
+    # Execute Standard Training
     else:
-        print("Please use --cancer [name] or --all to launch your recurrent training sequence.")
+        if args.all:
+            for name in CANCER_PROFILES.keys():
+                train_drqn_specialist(name, dataset_path, total_episodes=args.episodes)
+        elif args.cancer:
+            train_drqn_specialist(args.cancer, dataset_path, total_episodes=args.episodes)
+        else:
+            print("Please use --cancer [name] or --all to launch training.")
