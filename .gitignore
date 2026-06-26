@@ -1,6 +1,6 @@
 \__pycache__
 \.vscode
-\venv
+\.venv
 log_output.txt
 position_data.csv
 \datasets

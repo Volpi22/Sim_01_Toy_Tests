@@ -10,10 +10,10 @@ COMMAND-LINE ARGUMENTS:
     --n_trials   : Number of Optuna trials to run if optimizing. (Default: 30)
 
 USAGE EXAMPLES:
-1. Standard Training (Uses default or best known parameters):
+1. Standard Training (Uses default or saved optimal parameters):
    $ python3 train.py --cancer Hepatocellular_Carcinoma --episodes 1500
    
-2. Hyperparameter Optimization (Finds the best parameters automatically):
+2. Hyperparameter Optimization (Finds and saves the best parameters automatically):
    $ python3 train.py --cancer Glioblastoma --optimize --n_trials 30
 =============================================================================
 """
@@ -21,6 +21,7 @@ USAGE EXAMPLES:
 import os
 import random
 import argparse
+import json
 import numpy as np
 from collections import deque
 
@@ -167,51 +168,45 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500,
         if episode_idx % 10 == 0:
             target_net.load_state_dict(policy_net.state_dict())
             
-            # Format label to easily identify what phase we are in
             phase_label = f"[Trial {trial.number}]" if trial is not None else "[Main Training]"
             print(f"{phase_label} Episode {episode_idx}/{total_episodes} | Return Score: {episode_reward:.2f} | Exploration Epsilon: {epsilon:.2f}")
         
-        # Optuna Pruning Integration: Abort this trial if the AI is doing terribly
+        # Optuna Pruning Integration
         if trial is not None:
             trial.report(episode_reward, episode_idx)
             if trial.should_prune():
                 print(f"[Trial {trial.number}] PRUNED: Agent failed to learn quickly enough. Moving to next trial.")
                 raise optuna.exceptions.TrialPruned()
 
-    # Save the model if this is a standard training run (or the final retrain of an HPO run)
+    # Save the model
     if save_model:
         os.makedirs("models", exist_ok=True)
         save_path = f"models/{cancer_name}_recurrent_drqn.pt"
         torch.save(policy_net.state_dict(), save_path)
         print(f"\n[SUCCESS] Recurrent Specialist saved to {save_path}\n")
 
-    # Return the average performance of the fully trained agent
     return np.mean(recent_rewards) if len(recent_rewards) > 0 else episode_reward
 
 
 def optimize_specialist(cancer_name, data_path, n_trials=30, total_episodes=1000):
-    """Optuna Study: intelligently searches for the best parameters."""
+    """Optuna Study: intelligently searches for the best parameters and saves them."""
     print(f"\n{'='*60}")
     print(f" LAUNCHING OPTUNA HYPERPARAMETER OPTIMIZATION: {cancer_name}")
     print(f" Trials: {n_trials} | Episodes per Trial: {total_episodes}")
     print(f"{'='*60}\n")
 
     def objective(trial):
-        # 1. Define the search space for Optuna
         lr = trial.suggest_float("lr", 1e-5, 5e-3, log=True)
         gamma = trial.suggest_float("gamma", 0.90, 0.995)
         batch_size = trial.suggest_categorical("batch_size", [8, 16, 32])
         
-        # Calculate optimal decay so epsilon hits 0.05 at 80% of total_episodes
         target_episode = int(0.8 * total_episodes)
         dynamic_decay = (0.05) ** (1.0 / target_episode)
         
-        # Header for visibility at the start of every trial
         print(f"\n>>> STARTING TRIAL {trial.number} <<<")
         print(f"Testing Parameters -> LR: {lr:.5f} | Gamma: {gamma:.4f} | Batch Size: {batch_size} | Eps Decay: {dynamic_decay:.4f}")
         print("-" * 60)
         
-        # 2. Run training with these suggested parameters
         score = train_drqn_specialist(
             cancer_name=cancer_name, 
             data_path=data_path,
@@ -225,7 +220,6 @@ def optimize_specialist(cancer_name, data_path, n_trials=30, total_episodes=1000
         )
         return score
 
-    # Create and run the study
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=n_trials)
 
@@ -235,7 +229,13 @@ def optimize_specialist(cancer_name, data_path, n_trials=30, total_episodes=1000
     for key, value in study.best_params.items():
         print(f"    {key}: {value}")
         
-    # Recalculate the proper decay for the final 1500-episode run
+    # --- SAVE BEST PARAMETERS TO JSON ---
+    os.makedirs("config", exist_ok=True)
+    config_path = f"config/{cancer_name}_best_params.json"
+    with open(config_path, "w") as f:
+        json.dump(study.best_params, f, indent=4)
+    print(f"\n[INFO] Saved optimal parameters to {config_path}")
+        
     final_episodes = 1500
     final_decay = (0.05) ** (1.0 / int(0.8 * final_episodes))
         
@@ -255,6 +255,41 @@ def optimize_specialist(cancer_name, data_path, n_trials=30, total_episodes=1000
         save_model=True
     )
 
+def run_standard_training(cancer_name, data_path, total_episodes):
+    """Runs a standard training loop, injecting optimized parameters if available."""
+    config_path = f"config/{cancer_name}_best_params.json"
+    
+    # 1. Safe default fallback parameters
+    params = {"lr": 1e-3, "gamma": 0.99, "batch_size": 16}
+    
+    # 2. Check for saved Optuna parameters
+    if os.path.exists(config_path):
+        with open(config_path, "r") as f:
+            saved_params = json.load(f)
+            # Update the default dictionary with the saved one
+            params.update(saved_params) 
+        print(f"\n[INFO] Loaded optimal parameters from {config_path}:")
+        print(f"       LR: {params['lr']:.5f} | Gamma: {params['gamma']:.4f} | Batch Size: {params['batch_size']}")
+    else:
+        print(f"\n[WARNING] No optimal parameters found in 'config/'. Using default values.")
+        
+    final_decay = (0.05) ** (1.0 / int(0.8 * total_episodes))
+    
+    print("\n" + "="*60)
+    print(f" LAUNCHING STANDARD TRAINING: {cancer_name}")
+    print(f" Episodes: {total_episodes}")
+    print("="*60 + "\n")
+    
+    train_drqn_specialist(
+        cancer_name=cancer_name,
+        data_path=data_path,
+        total_episodes=total_episodes,
+        batch_size=params["batch_size"],
+        gamma=params["gamma"],
+        lr=params["lr"],
+        epsilon_decay=final_decay,
+        save_model=True
+    )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train or Optimize AI Recurrent Specialists")
@@ -279,12 +314,12 @@ if __name__ == "__main__":
         else:
             print("Please specify --cancer [name] or --all to run optimization.")
             
-    # Execute Standard Training
+    # Execute Standard Training (with smart parameter loading)
     else:
         if args.all:
             for name in CANCER_PROFILES.keys():
-                train_drqn_specialist(name, dataset_path, total_episodes=args.episodes)
+                run_standard_training(name, dataset_path, args.episodes)
         elif args.cancer:
-            train_drqn_specialist(args.cancer, dataset_path, total_episodes=args.episodes)
+            run_standard_training(args.cancer, dataset_path, args.episodes)
         else:
             print("Please use --cancer [name] or --all to launch training.")
