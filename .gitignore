@@ -3,8 +3,8 @@
 \.venv
 log_output.txt
 position_data.csv
-\datasets
 \raw_ns3_traces
+ns3_1_week_log.txt
 optuna_study_ph.db
 optuna_study_temp.db
 optuna_study_combined.db
