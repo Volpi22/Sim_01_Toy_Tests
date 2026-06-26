@@ -142,9 +142,10 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500,
         # DRQN Sequence Optimization Step
         if len(buffer) > batch_size:
             samples = buffer.sample(batch_size)
+            
+            # 1. Clear old gradients
             optimizer.zero_grad()
             
-            loss = 0
             for seq in samples:
                 states = torch.FloatTensor(np.array([t[0] for t in seq])).unsqueeze(0).to(device)
                 actions = torch.LongTensor(np.array([t[1] for t in seq])).unsqueeze(0).unsqueeze(-1).to(device)
@@ -158,10 +159,15 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500,
                 state_action_values = q_values.gather(2, actions).squeeze(-1)
                 expected_state_action_values = rewards + (gamma * next_q_values.max(dim=2)[0] * (1 - dones))
                 
-                loss += nn.MSELoss()(state_action_values, expected_state_action_values.detach())
+                # 2. Calculate loss for this SINGLE sequence and scale it down by batch size
+                seq_loss = nn.MSELoss()(state_action_values, expected_state_action_values.detach())
+                seq_loss = seq_loss / batch_size
+                
+                # 3. Backpropagate IMMEDIATELY. 
+                # This calculates gradients and instantly deletes the heavy computational graph!
+                seq_loss.backward()
             
-            loss = loss / batch_size
-            loss.backward()
+            # 4. Step the optimizer once all gradients from the batch are safely accumulated
             optimizer.step()
             
         # Unmuted Logging: Print progress every 10 episodes for BOTH optimization and final training
