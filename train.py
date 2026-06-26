@@ -26,7 +26,8 @@ import numpy as np
 from collections import deque
 
 import torch
-torch.set_num_threads(torch.get_num_threads())
+# torch.set_num_threads(torch.get_num_threads()) # Uncomment this line if running on GPU
+torch.backends.mkldnn.enabled = False            # Comment this line if running on GPU
 import torch.nn as nn
 import torch.optim as optim
 

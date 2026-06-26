@@ -1,9 +1,13 @@
 """
 =============================================================================
-Therapeutic Thermostat: Clinical Evaluation & Visualization
+Therapeutic Thermostat: Clinical Evaluation & Stress Testing
 =============================================================================
-Loads a trained DRQN specialist, runs a single 4-hour chemotherapy session,
-and generates a multi-panel clinical dashboard plotting the agent's behavior.
+Evaluates a trained DRQN specialist against 3 clinical scenarios:
+1. Standard Session
+2. Resistance Test (Tumor is immune to the drug)
+3. Toxicity Prediction Test (Patient has severe organ impairment)
+
+Outputs a comprehensive text report and a side-by-side comparative dashboard.
 """
 
 import os
@@ -14,30 +18,32 @@ import matplotlib.pyplot as plt
 from environment import PredictiveChemoEnv
 from train import DRQN, CANCER_PROFILES
 
-def evaluate_specialist(cancer_name, model_path, data_path):
-    print(f"\n{'='*60}")
-    print(f" EVALUATING SPECIALIST: {cancer_name}")
-    print(f"{'='*60}\n")
-
-    # 1. Initialize Environment
-    env = PredictiveChemoEnv(
-        schedule_parquet_path=data_path, 
-        drug_name=CANCER_PROFILES[cancer_name]['drug'], 
-        tumor_zone=CANCER_PROFILES[cancer_name]['zone']
-    )
+def run_scenario(env, model, device, scenario_name):
+    """Runs a single simulation episode under a specific clinical scenario."""
+    obs, _ = env.reset()
     
-    # 2. Load Trained Model
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    model = DRQN(input_dim=43, num_actions=10).to(device)
-    
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model file not found at {model_path}. Please train the agent first.")
+    # --- INJECT CLINICAL STRESS TESTS INTO THE PHYSICS ENGINE ---
+    if scenario_name == "Standard Session":
+        # Force a perfectly average patient by undoing the domain randomization
+        env.engine.drug['k_elim'] /= env.patient_clearance_factor
         
-    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
-    model.eval() # Set to evaluation mode (disables dropout, etc.)
+    elif scenario_name == "Resistance (Dead-End)":
+        # Tumor is totally immune. Drug has 0.0 effect on microenvironment.
+        env.engine.pd['eta_ph'] = 0.0
+        env.engine.pd['eta_temp'] = 0.0
+        
+    elif scenario_name == "Toxicity (Slippery Road)":
+        # Severe organ impairment: Clearance rate drops by 70% from nominal baseline
+        env.engine.drug['k_elim'] /= env.patient_clearance_factor  # Revert to baseline
+        env.engine.drug['k_elim'] *= 0.30                          # Apply 70% impairment
 
-    # 3. Trackers for Visualization
+    hidden = None
+    terminated = False
+    truncated = False
+    total_reward = 0
+    
+    tz_idx = env.tumor_zone - 1
+    
     history = {
         'time': [],
         'tumor_ph': [],
@@ -46,120 +52,143 @@ def evaluate_specialist(cancer_name, model_path, data_path):
         'toxicity': []
     }
 
-    obs, _ = env.reset()
-    hidden = None
-    terminated = False
-    truncated = False
-    total_reward = 0
-    
-    tz_idx = env.tumor_zone - 1
-    healthy_baseline_ph = env.mu_B_ph[tz_idx]
-    healthy_baseline_temp = env.mu_B_temp[tz_idx]
-
-    print("Running 4-hour clinical simulation...")
-    
-    # 4. Run the Episode
     while not (terminated or truncated):
-        # Convert observation to PyTorch tensor
         obs_tensor = torch.FloatTensor(obs).view(1, 1, -1).to(device)
         
-        # Agent decides best action strictly based on learned policy (no exploration)
         with torch.no_grad():
             q_vals, hidden = model(obs_tensor, hidden)
             action = q_vals[0, 0, :].argmax().item()
             
         next_obs, reward, terminated, truncated, _ = env.step(action)
         
-        # Log metrics for plotting
         history['time'].append(env.current_step)
-        history['tumor_ph'].append(next_obs[tz_idx])           # Index for Tumor pH
-        history['tumor_temp'].append(next_obs[tz_idx + 20])    # Index for Tumor Temperature (Offset by 20)
-        history['toxicity'].append(next_obs[40])               # Index for Toxicity
-        history['dose'].append(next_obs[41] * 100)             # Index for Dose (convert to %)
+        history['tumor_ph'].append(next_obs[tz_idx])
+        history['tumor_temp'].append(next_obs[tz_idx + 20])
+        history['toxicity'].append(next_obs[40])
+        history['dose'].append(next_obs[41] * 100)
         
         obs = next_obs
         total_reward += reward
+        
+    return history, total_reward, terminated
 
-    # 5. Compile and Save Text Summary
-    os.makedirs("results", exist_ok=True)
-    
-    result_status = "FAILURE. Toxicity threshold breached." if terminated else "SUCCESS. Patient completed session safely."
-    
-    summary_text = (
-        f"Simulation Complete!\n"
-        f"Total Accumulated Reward: {total_reward:.2f}\n"
-        f"Final Toxicity Level: {history['toxicity'][-1]:.2f} / {env.critical_toxicity_threshold}\n"
-        f"RESULT: {result_status}\n"
+def evaluate_specialist(cancer_name, model_path, data_path):
+    print(f"\n{'='*80}")
+    print(f" EVALUATING SPECIALIST: {cancer_name}")
+    print(f"{'='*80}\n")
+
+    env = PredictiveChemoEnv(
+        schedule_parquet_path=data_path, 
+        drug_name=CANCER_PROFILES[cancer_name]['drug'], 
+        tumor_zone=CANCER_PROFILES[cancer_name]['zone']
     )
     
-    print(f"\n{summary_text}")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = DRQN(input_dim=43, num_actions=10).to(device)
     
-    txt_save_path = f"results/{cancer_name}_evaluation.txt"
-    with open(txt_save_path, "w") as f:
-        f.write(f"EVALUATION SUMMARY: {cancer_name}\n")
-        f.write("-" * 40 + "\n")
-        f.write(summary_text)
-    print(f"Text output saved successfully to {txt_save_path}")
+    if not os.path.exists(model_path):
+        print(f"[ERROR] Model file not found at {model_path}. Skipping...")
+        return
+        
+    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
+    model.eval()
 
-    # 6. Generate Clinical Dashboard
-    plot_clinical_dashboard(cancer_name, history, healthy_baseline_ph, healthy_baseline_temp, env.critical_toxicity_threshold)
+    scenarios = ["Standard Session", "Resistance (Dead-End)", "Toxicity (Slippery Road)"]
+    results = {}
+    
+    tz_idx = env.tumor_zone - 1
+    healthy_baseline_ph = env.mu_B_ph[tz_idx]
+    healthy_baseline_temp = env.mu_B_temp[tz_idx]
 
-def plot_clinical_dashboard(cancer_name, history, healthy_ph, healthy_temp, tox_threshold):
-    """Generates a 4-panel matplotlib dashboard of the episode."""
+    # 1. Run all scenarios
+    for scenario in scenarios:
+        print(f"Running Scenario: {scenario}...")
+        history, reward, terminated = run_scenario(env, model, device, scenario)
+        results[scenario] = {
+            'history': history,
+            'reward': reward,
+            'failed': terminated,
+            'final_tox': history['toxicity'][-1]
+        }
+
+    # 2. Compile Text Report
+    os.makedirs("results", exist_ok=True)
+    report_path = f"results/{cancer_name}_stress_report.txt"
+    
+    with open(report_path, "w") as f:
+        f.write(f"CLINICAL STRESS TEST REPORT: {cancer_name}\n")
+        f.write("=" * 60 + "\n\n")
+        
+        for scenario, res in results.items():
+            status = "CRITICAL FAILURE (Toxicity Breached)" if res['failed'] else "SUCCESS (Safely Managed)"
+            f.write(f"--- {scenario} ---\n")
+            f.write(f"Outcome       : {status}\n")
+            f.write(f"Total Reward  : {res['reward']:.2f}\n")
+            f.write(f"Final Toxicity: {res['final_tox']:.2f} / {env.critical_toxicity_threshold}\n\n")
+            
+    print(f"\n[INFO] Stress report saved to {report_path}")
+
+    # 3. Generate Comparative Dashboard
+    plot_comparative_dashboard(cancer_name, results, scenarios, healthy_baseline_ph, healthy_baseline_temp, env.critical_toxicity_threshold)
+
+def plot_comparative_dashboard(cancer_name, results, scenarios, healthy_ph, healthy_temp, tox_threshold):
+    """Generates a 12-panel (4x3) comparative dashboard."""
     plt.style.use('dark_background')
-    fig, axs = plt.subplots(4, 1, figsize=(12, 14), sharex=True)
-    fig.suptitle(f'Clinical Dashboard: {cancer_name.replace("_", " ")} Specialist', fontsize=16, fontweight='bold')
+    fig, axs = plt.subplots(4, 3, figsize=(18, 14), sharex='col', sharey='row')
+    fig.suptitle(f'AI Clinical Stress Tests: {cancer_name.replace("_", " ")}', fontsize=18, fontweight='bold', y=0.98)
 
-    # Plot 1: Tumor pH Efficacy
-    axs[0].plot(history['time'], history['tumor_ph'], color='cyan', linewidth=2, label='Observed Tumor pH')
-    axs[0].axhline(y=healthy_ph, color='lime', linestyle='--', alpha=0.7, label=f'Healthy Target ({healthy_ph:.2f})')
-    axs[0].set_ylabel('Tumor pH')
-    axs[0].set_title('Therapeutic Efficacy (Acidosis Reversal)')
-    axs[0].legend(loc='lower right')
-    axs[0].grid(True, alpha=0.2)
+    for col, scenario in enumerate(scenarios):
+        history = results[scenario]['history']
+        
+        # Column Titles
+        axs[0, col].set_title(scenario, fontsize=14, fontweight='bold', pad=10)
+        
+        # Plot 1: pH (Row 0)
+        axs[0, col].plot(history['time'], history['tumor_ph'], color='cyan', linewidth=2)
+        axs[0, col].axhline(y=healthy_ph, color='lime', linestyle='--', alpha=0.7)
+        axs[0, col].grid(True, alpha=0.2)
+        if col == 0: axs[0, col].set_ylabel('Tumor pH')
 
-    # Plot 2: Tumor Temperature Efficacy
-    axs[1].plot(history['time'], history['tumor_temp'], color='tomato', linewidth=2, label='Observed Tumor Temp')
-    axs[1].axhline(y=healthy_temp, color='lime', linestyle='--', alpha=0.7, label=f'Healthy Target ({healthy_temp:.2f}°C)')
-    axs[1].set_ylabel('Tumor Temp (°C)')
-    axs[1].set_title('Therapeutic Efficacy (Hyperthermia Reversal)')
-    axs[1].legend(loc='upper right')
-    axs[1].grid(True, alpha=0.2)
+        # Plot 2: Temp (Row 1)
+        axs[1, col].plot(history['time'], history['tumor_temp'], color='tomato', linewidth=2)
+        axs[1, col].axhline(y=healthy_temp, color='lime', linestyle='--', alpha=0.7)
+        axs[1, col].grid(True, alpha=0.2)
+        if col == 0: axs[1, col].set_ylabel('Tumor Temp (°C)')
 
-    # Plot 3: Administered Dose
-    axs[2].step(history['time'], history['dose'], color='magenta', linewidth=2, where='post')
-    axs[2].set_ylabel('Dose (% of Nominal)')
-    axs[2].set_title('AI-Controlled Chemotherapy Infusion Rate')
+        # Plot 3: Dose (Row 2)
+        axs[2, col].step(history['time'], history['dose'], color='magenta', linewidth=2, where='post')
+        axs[2, col].set_ylim(-5, 115) 
+        axs[2, col].grid(True, alpha=0.2)
+        if col == 0: axs[2, col].set_ylabel('Infusion Dose (%)')
+
+        # Plot 4: Toxicity (Row 3)
+        axs[3, col].plot(history['time'], history['toxicity'], color='orange', linewidth=2)
+        axs[3, col].axhline(y=tox_threshold, color='red', linestyle='-', linewidth=2)
+        axs[3, col].grid(True, alpha=0.2)
+        axs[3, col].set_xlabel('Simulation Time (Minutes)')
+        if col == 0: axs[3, col].set_ylabel('Systemic Toxicity')
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
     
-    # ---> UPDATED Y-AXIS TO SUPPORT 0% EMERGENCY STOP <---
-    axs[2].set_ylim(-5, 115) 
-    
-    axs[2].grid(True, alpha=0.2)
-
-    # Plot 4: Systemic Toxicity
-    axs[3].plot(history['time'], history['toxicity'], color='orange', linewidth=2)
-    axs[3].axhline(y=tox_threshold, color='red', linestyle='-', linewidth=2, label='Critical Failure Limit')
-    axs[3].set_ylabel('Accumulated Toxicity')
-    axs[3].set_title('Clearance Organ Safety Monitoring')
-    axs[3].set_xlabel('Simulation Time (Minutes)')
-    axs[3].legend(loc='upper left')
-    axs[3].grid(True, alpha=0.2)
-
-    plt.tight_layout()
-    
-    # Save the figure
-    save_path = f"results/{cancer_name}_evaluation.png"
+    save_path = f"results/{cancer_name}_stress_dashboard.png"
     plt.savefig(save_path, dpi=300)
-    print(f"Dashboard saved successfully to {save_path}")
+    print(f"[INFO] Dashboard saved to {save_path}")
     plt.show()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Evaluate a Trained AI Specialist")
-    parser.add_argument("--cancer", type=str, required=True, choices=list(CANCER_PROFILES.keys()), 
-                        help="The clinical profile to evaluate.")
+    parser = argparse.ArgumentParser(description="Evaluate AI Specialists against Clinical Stress Tests")
+    parser.add_argument("--cancer", type=str, choices=list(CANCER_PROFILES.keys()), help="Target clinical profile.")
+    parser.add_argument("--all", action="store_true", help="Evaluate all trained specialists.")
     args = parser.parse_args()
 
-    model_path = f"models/{args.cancer}_recurrent_drqn.pt"
     dataset_path = "datasets/1_week_sampling_schedule.parquet"
     
-    evaluate_specialist(args.cancer, model_path, dataset_path)
+    if args.all:
+        for cancer_name in CANCER_PROFILES.keys():
+            model_path = f"models/{cancer_name}_recurrent_drqn.pt"
+            evaluate_specialist(cancer_name, model_path, dataset_path)
+    elif args.cancer:
+        model_path = f"models/{args.cancer}_recurrent_drqn.pt"
+        evaluate_specialist(args.cancer, model_path, dataset_path)
+    else:
+        print("Please specify --cancer [name] or --all to run the evaluation.")
