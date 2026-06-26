@@ -29,7 +29,6 @@ def evaluate_specialist(cancer_name, model_path, data_path):
     # 2. Load Trained Model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # ---> UPDATED TO 10 ACTIONS <---
     model = DRQN(input_dim=43, num_actions=10).to(device)
     
     if not os.path.exists(model_path):

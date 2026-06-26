@@ -56,7 +56,6 @@ class PredictiveChemoEnv(gym.Env):
         
         # --- DIRECT PARAMETER INJECTION ---
         # Mutates the engine's copy of the drug constants for this episode's specific patient.
-        # This keeps domain randomization intact without changing simulation.py's method signatures.
         if hasattr(self.engine, 'drug') and 'k_elim' in self.engine.drug:
             self.engine.drug['k_elim'] *= self.patient_clearance_factor
         
@@ -113,12 +112,16 @@ class PredictiveChemoEnv(gym.Env):
         return np.sqrt(z_ph**2 + z_temp**2)
 
     def step(self, action):
+        old_dose = self.current_dose
         new_dose = self.action_mapping[action]
+        dose_diff = new_dose - old_dose
         
         # Traceable Explanatory Wrapper
-        if new_dose < self.current_dose:
-            print(f"[ALERT] Minute {self.current_step}: Reduced infusion to {new_dose*100}%.")
-        
+        if dose_diff < 0:
+            print(f"[CLINICAL ALERT] Minute {self.current_step}: Emergency reduction to {new_dose*100:.1f}%.")
+        elif dose_diff > 0.40:
+            print(f"[WARNING] Minute {self.current_step}: Dangerous upward dose spike! (+{dose_diff*100:.1f}%)")
+            
         self.current_dose = new_dose
         
         # Toxicity-Induced Hemodynamic Shift
@@ -126,7 +129,6 @@ class PredictiveChemoEnv(gym.Env):
         cardiac_multiplier = 1.0 + stress_factor
         
         # Step Physics Engine (1 minute)
-        # Signature restored to its original native form
         self.engine.step_pharmacokinetics(self.current_dose, cardiac_multiplier=cardiac_multiplier)
         
         data_idx = 15 + self.current_step
@@ -192,7 +194,15 @@ class PredictiveChemoEnv(gym.Env):
         efficacy = -(curr_dist - self.prev_distance)
         self.prev_distance = curr_dist
         
-        reward = (10.0 * efficacy) - (5.0 * step_tox)
+        # 2. Asymmetric & Quadratic Shock Penalty
+        if dose_diff > 0:
+            # Ascending: Square the difference. Massive punishment for huge jumps.
+            smoothing_penalty = 15.0 * (dose_diff ** 2)
+        else:
+            # Descending: Linear and tiny. Allows safe emergency stops.
+            smoothing_penalty = 1.0 * abs(dose_diff)
+            
+        reward = (10.0 * efficacy) - (5.0 * step_tox) - smoothing_penalty
         
         self.current_step += 1
         terminated = self.total_toxicity > self.critical_toxicity_threshold 
