@@ -1,6 +1,7 @@
 \__pycache__
 \.vscode
 \.venv
+\venv
 log_output.txt
 position_data.csv
 \raw_ns3_traces
