@@ -31,7 +31,6 @@ torch.backends.mkldnn.enabled = False            # Comment this line if running 
 import torch.nn as nn
 import torch.optim as optim
 
-# Import Optuna for Bayesian Hyperparameter Optimization
 import optuna
 
 from environment import PredictiveChemoEnv
@@ -164,19 +163,30 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500,
                 seq_loss = nn.MSELoss()(state_action_values, expected_state_action_values.detach())
                 seq_loss = seq_loss / batch_size
                 
-                # 3. Backpropagate IMMEDIATELY. 
-                # This calculates gradients and instantly deletes the heavy computational graph!
+                # 3. Backpropagate
                 seq_loss.backward()
             
             # 4. Step the optimizer once all gradients from the batch are safely accumulated
             optimizer.step()
             
-        # Unmuted Logging: Print progress every 10 episodes for BOTH optimization and final training
+        # 5. Periodic Target Network Update
         if episode_idx % 10 == 0:
             target_net.load_state_dict(policy_net.state_dict())
             
-            phase_label = f"[Trial {trial.number}]" if trial is not None else "[Main Training]"
-            print(f"{phase_label} Episode {episode_idx}/{total_episodes} | Return Score: {episode_reward:.2f} | Exploration Epsilon: {epsilon:.2f}")
+        # Determine the clinical outcome of the simulation
+        if terminated:
+            outcome_str = f"FATAL: Reached max toxicity at minute {env.current_step}."
+        else:
+            outcome_str = f"SUCCESS: Patient survived the full 240-minute simulation!"
+            
+        # Print a clean, 1-line pulse check for every episode (or every 10 for Optuna)
+        if trial is None:
+            # Standard Training: Print every episode so you can watch the AI learn to save patients
+            print(f"Ep {episode_idx:4d}/{total_episodes} | {outcome_str:<50} | Score: {episode_reward:7.2f} | Eps: {epsilon:.2f}")
+        else:
+            # Optuna Optimization: Print every 10 episodes to keep the hyperparameter logs clean
+            if episode_idx % 10 == 0:
+                print(f"[Trial {trial.number}] Ep {episode_idx:4d}/{total_episodes} | {outcome_str:<50} | Score: {episode_reward:7.2f}")
         
         # Optuna Pruning Integration
         if trial is not None:

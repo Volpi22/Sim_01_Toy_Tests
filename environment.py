@@ -20,7 +20,6 @@ class PredictiveChemoEnv(gym.Env):
         self.drug_name = drug_name
         self.tumor_zone = tumor_zone
         
-        # --- HYBRID ACTION SPACE ---
         # 0-3: Broad strokes for emergencies and stabilization
         # 4-9: Fine-tuned increments for precision targeting
         self.action_space = spaces.Discrete(10)
@@ -29,7 +28,7 @@ class PredictiveChemoEnv(gym.Env):
             1: 0.25,  # Quarter Dose
             2: 0.50,  # Half Dose
             3: 0.75,  # Three-Quarter Dose
-            4: 0.85,  # Precision adjustments...
+            4: 0.85,  # Precision adjustments:
             5: 0.90,
             6: 0.95,
             7: 1.00,  # Nominal Prescribed Dose
@@ -47,21 +46,19 @@ class PredictiveChemoEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         
-        # --- DOMAIN RANDOMIZATION ---
         # Randomizes the patient's metabolic clearance rate by +/- 20%
         # A value of 0.80 means sluggish kidneys; 1.20 means highly efficient clearance.
         self.patient_clearance_factor = np.random.uniform(0.80, 1.20)
         
         self.engine = DigitalPatientEngine(drug_name=self.drug_name)
         
-        # --- DIRECT PARAMETER INJECTION ---
         # Mutates the engine's copy of the drug constants for this episode's specific patient.
         if hasattr(self.engine, 'drug') and 'k_elim' in self.engine.drug:
             self.engine.drug['k_elim'] *= self.patient_clearance_factor
         
         self.current_step = 0
         self.total_toxicity = 0.0
-        self.current_dose = 1.0 
+        self.current_dose = 0.0
         
         # Track asynchronous aggregation intervals dynamically
         self.minutes_since_last_aggregation = 0
@@ -117,10 +114,8 @@ class PredictiveChemoEnv(gym.Env):
         dose_diff = new_dose - old_dose
         
         # Traceable Explanatory Wrapper
-        if dose_diff < 0:
-            print(f"[CLINICAL ALERT] Minute {self.current_step}: Emergency reduction to {new_dose*100:.1f}%.")
-        elif dose_diff > 0.40:
-            print(f"[WARNING] Minute {self.current_step}: Dangerous upward dose spike! (+{dose_diff*100:.1f}%)")
+        if dose_diff <= -0.50:
+            print(f"    -> [CLINICAL ALERT] Minute {self.current_step}: Massive emergency dose reduction ({dose_diff*100:.0f}%)!")
             
         self.current_dose = new_dose
         
@@ -191,25 +186,39 @@ class PredictiveChemoEnv(gym.Env):
 
         # Calculate Reward based on ground truth
         curr_dist = self._calc_tumor_distance(true_ph, true_temp)
+        
+        # 1. Therapeutic Efficacy (Velocity of healing)
         efficacy = -(curr_dist - self.prev_distance)
         self.prev_distance = curr_dist
         
-        # 2. Asymmetric & Quadratic Shock Penalty
+        # 2. The "Pathological Footprint" Penalty
+        disease_penalty = 1.0 * curr_dist
+        
+        # We set the reference denominator to 75% of the max threshold to account for drug inertia.
+        # At exactly 75% toxicity, the ratio is 1.0, and the penalty multiplier (200.0) 
+        # cancels out the maximum efficacy reward (200.0), creating a mathematical equilibrium.
+        warning_threshold = 0.75 * self.critical_toxicity_threshold
+        risk_ratio = self.total_toxicity / warning_threshold
+        
+        # If toxicity > 75%, risk_ratio > 1, and the cubic exponent makes the penalty explode.
+        toxicity_penalty = 200.0 * step_tox * (risk_ratio ** 3)
+        
+        # 3. Asymmetric & Quadratic Shock Penalty
         if dose_diff > 0:
-            # Ascending: Square the difference. Massive punishment for huge jumps.
-            smoothing_penalty = 15.0 * (dose_diff ** 2)
+            smoothing_penalty = 50.0 * (dose_diff ** 2)
         else:
-            # Descending: Linear and tiny. Allows safe emergency stops.
-            smoothing_penalty = 1.0 * abs(dose_diff)
+            smoothing_penalty = 25.0 * (dose_diff ** 2)
             
-        reward = (10.0 * efficacy) - (5.0 * step_tox) - smoothing_penalty
+        # 4. Total Reward Calculation
+        reward = (200.0 * efficacy) - disease_penalty - toxicity_penalty - smoothing_penalty
         
         self.current_step += 1
         terminated = self.total_toxicity > self.critical_toxicity_threshold 
         truncated = self.current_step >= self.max_steps 
         
         if terminated: 
-            reward -= 500
+            # Death penalty
+            reward -= 10000 
             
         current_obs = np.concatenate([visible_ph, visible_temp, [self.total_toxicity, self.current_dose, confidence_flag]])
         

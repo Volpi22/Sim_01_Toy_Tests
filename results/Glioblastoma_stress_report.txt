@@ -1,0 +1,18 @@
+CLINICAL STRESS TEST REPORT: Glioblastoma
+============================================================
+
+--- Standard Session ---
+Outcome       : CRITICAL FAILURE (Toxicity Breached)
+Total Reward  : -9081.58
+Final Toxicity: 51.03 / 50.0
+
+--- Resistance (Dead-End) ---
+Outcome       : CRITICAL FAILURE (Toxicity Breached)
+Total Reward  : -11413.46
+Final Toxicity: 50.24 / 50.0
+
+--- Toxicity (Slippery Road) ---
+Outcome       : CRITICAL FAILURE (Toxicity Breached)
+Total Reward  : -11496.87
+Final Toxicity: 50.41 / 50.0
+
