@@ -45,7 +45,7 @@ CANCER_PROFILES = {
 
 class DRQN(nn.Module):
     """Deep Recurrent Q-Network Architecture for Multi-Rate Signal Fusion."""
-    def __init__(self, input_dim=5, num_actions=10, hidden_dim=256):
+    def __init__(self, input_dim=63, num_actions=10, hidden_dim=256):
         super(DRQN, self).__init__()
         self.hidden_dim = hidden_dim
         
@@ -98,8 +98,8 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500,
     )
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    policy_net = DRQN(input_dim=5, num_actions=10).to(device)
-    target_net = DRQN(input_dim=5, num_actions=10).to(device)
+    policy_net = DRQN(input_dim=63, num_actions=10).to(device)
+    target_net = DRQN(input_dim=63, num_actions=10).to(device)
     target_net.load_state_dict(policy_net.state_dict())
     
     optimizer = optim.Adam(policy_net.parameters(), lr=lr)

@@ -62,9 +62,28 @@ class DigitalPatientEngine:
 
     def apply_pharmacodynamics(self, base_ph_array, base_temp_array):
         """
-        Applies the shift driven by the EFFECT COMPARTMENT (Ce), not the blood plasma.
+        1. Applies the primary therapeutic shift driven by the EFFECT COMPARTMENT (Ce).
+        2. Applies secondary physiological side effects (Fever/Acidosis) if local plasma 
+           toxicity exceeds safe thresholds.
         """
+        # 1. Primary Therapeutic Effect
         current_ph = base_ph_array + (self.pd['eta_ph'] * self.Ce[1:])
         current_temp = base_temp_array + (self.pd['eta_temp'] * self.Ce[1:])
+        
+        # 2. Secondary Systemic Side Effects (Toxicity-Induced)
+        c_safe = self.drug['C_safe']
+        
+        for i in range(20):
+            plasma_conc = self.C[i + 1] # 1-based indexing in the C array
+            
+            # If the local organ's concentration exceeds the safe limit, apply side effects
+            if plasma_conc > c_safe:
+                tox_overage = plasma_conc - c_safe
+                
+                # Side Effect 1: Drug-induced localized fever (+0.5 °C per unit of severe overage)
+                current_temp[i] += (0.50 * tox_overage)
+                
+                # Side Effect 2: Drug-induced metabolic acidosis (-0.2 pH per unit of severe overage)
+                current_ph[i] -= (0.20 * tox_overage)
         
         return current_ph, current_temp

@@ -30,7 +30,7 @@ class IoBNT_DataExtractor:
     def generate_1_week_schedule(self, input_csv, max_minutes=10080):
         print("Initializing 1-week continuous baseline noise extraction...")
         df = self._load_data(input_csv)
-        energy_model = EnergyModel(param_type='combined')
+        energy_model = EnergyModel(param_type='triple')
         
         ph_dict = self.dm.get_data_dict('ph')
         temp_dict = self.dm.get_data_dict('temp')
@@ -82,7 +82,7 @@ class IoBNT_DataExtractor:
                     minute_buffers[zone]['ph'].append(v_ph)
                     minute_buffers[zone]['temp'].append(v_temp)
                     
-                    state['energy'] = max(0, state['energy'] - energy_model.action_consumption('combined'))
+                    state['energy'] = max(0, state['energy'] - energy_model.action_consumption('triple'))
                     state['has_sampled_this_cycle'] = True
                     
             state['prev_vessel'] = vessel

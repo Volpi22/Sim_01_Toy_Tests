@@ -263,14 +263,16 @@ class EnergyModel:
         return min(new_energy, self.E_max)
         
     def get_payload_size(self, param_type: str) -> int:
-        sizes = {'ph': 8, 'temp': 16, 'combined': 24}
+        sizes = {'ph': 8, 'temp': 16, 'combined': 24, 'triple': 40}
         return sizes.get(param_type, 32)
 
     def get_sensing_cost(self, param_type: str) -> float: 
         costs = {
             'ph': 1.5e-15,
             'temp': 97.64e-15,
-            'combined': 1.5e-15 + 97.64e-15
+            'toxicity': 97.64e-15,
+            'combined': 1.5e-15 + 97.64e-15,
+            'triple': 1.5e-15 + 97.64e-15 + 97.64e-15
         }
         return costs.get(param_type, 0.5e-15)
 

@@ -66,8 +66,9 @@ def run_scenario(env, model, device, scenario_name):
         # Safely extract the real clinical values for plotting
         history['tumor_ph'].append(info['real_ph'])
         history['tumor_temp'].append(info['real_temp'])
-        history['toxicity'].append(next_obs[2] * env.critical_toxicity_threshold) # Un-normalize
-        history['dose'].append(next_obs[3] * 100) # Un-normalize
+        history['clearance_temp'].append(info['clearance_temp']) # <-- Added this
+        history['toxicity'].append(next_obs[2] * env.critical_toxicity_threshold) 
+        history['dose'].append(next_obs[3] * 100)
         
         obs = next_obs
         total_reward += reward
@@ -87,7 +88,7 @@ def run_metrics_evaluation(cancer_name, model_path, data_path, num_patients=100)
     )
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = DRQN(input_dim=5, num_actions=10).to(device)
+    model = DRQN(input_dim=63, num_actions=10).to(device)
     
     if not os.path.exists(model_path):
         print(f"[ERROR] Model file not found at {model_path}. Skipping...")
@@ -178,7 +179,7 @@ def evaluate_specialist(cancer_name, model_path, data_path):
     )
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = DRQN(input_dim=5, num_actions=10).to(device)
+    model = DRQN(input_dim=63, num_actions=10).to(device)
     
     if not os.path.exists(model_path):
         print(f"[ERROR] Model file not found at {model_path}. Skipping...")
@@ -246,10 +247,13 @@ def plot_comparative_dashboard(cancer_name, results, scenarios, healthy_ph, heal
         if col == 0: axs[0, col].set_ylabel('Tumor pH')
 
         # Plot 2: Temp (Row 1)
-        axs[1, col].plot(history['time'], history['tumor_temp'], color='tomato', linewidth=2)
+        axs[1, col].plot(history['time'], history['tumor_temp'], color='tomato', linewidth=2, label='Tumor')
+        axs[1, col].plot(history['time'], history['clearance_temp'], color='yellow', linewidth=2, linestyle=':', label='Clearance Organ')
         axs[1, col].axhline(y=healthy_temp, color='lime', linestyle='--', alpha=0.7)
         axs[1, col].grid(True, alpha=0.2)
-        if col == 0: axs[1, col].set_ylabel('Tumor Temp (°C)')
+        if col == 0: 
+            axs[1, col].set_ylabel('Temp (°C)')
+            axs[1, col].legend(loc='upper right', fontsize=8)
 
         # Plot 3: Dose (Row 2)
         axs[2, col].step(history['time'], history['dose'], color='magenta', linewidth=2, where='post')
