@@ -124,10 +124,14 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500,
             
             if random.random() < epsilon:
                 action = env.action_space.sample()
+                # If picking randomly, we still need to step the LSTM to keep memory aligned
+                with torch.no_grad():
+                    _, hidden = policy_net(obs_tensor, hidden)
             else:
                 with torch.no_grad():
                     q_vals, next_hidden = policy_net(obs_tensor, hidden)
                     action = q_vals[0, 0, :].argmax().item()
+                    hidden = next_hidden 
             
             next_obs, reward, terminated, truncated, _ = env.step(action)
             episode_history.append((obs, action, reward, next_obs, float(terminated)))
@@ -144,9 +148,18 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500,
             samples = buffer.sample(batch_size)
             optimizer.zero_grad()
             
-            for seq in samples:
-                # THE FIX: Create a continuous sequence of length T+1
-                # This ensures the LSTM's hidden state perfectly aligns for current and next states
+            # Truncated BPTT Sequence Length
+            max_seq_len = 64 
+            
+            for full_seq in samples:
+                # Randomly slice a 64-step chunk from the 240-minute episode
+                if len(full_seq) > max_seq_len:
+                    start_idx = random.randint(0, len(full_seq) - max_seq_len)
+                    seq = full_seq[start_idx : start_idx + max_seq_len]
+                else:
+                    seq = full_seq
+                    
+                # Create a continuous sequence of length T+1
                 states = [t[0] for t in seq] + [seq[-1][3]] 
                 states_tensor = torch.FloatTensor(np.array(states)).unsqueeze(0).to(device)
                 
@@ -154,7 +167,7 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500,
                 rewards = torch.FloatTensor(np.array([t[2] for t in seq])).unsqueeze(0).to(device)
                 dones = torch.FloatTensor(np.array([t[4] for t in seq])).unsqueeze(0).to(device)
                 
-                # Pass the ENTIRE sequence through the networks once
+                # Pass the truncated sequence through the networks
                 all_q_values, _ = policy_net(states_tensor)
                 with torch.no_grad():
                     all_target_q, _ = target_net(states_tensor)
@@ -220,7 +233,8 @@ def optimize_specialist(cancer_name, data_path, n_trials=30, total_episodes=1000
         gamma = trial.suggest_float("gamma", 0.90, 0.995)
         batch_size = trial.suggest_categorical("batch_size", [8, 16, 32])
         
-        target_episode = int(0.8 * total_episodes)
+        # SLOWER DECAY: Explore for 95% of the trial
+        target_episode = int(0.95 * total_episodes)
         dynamic_decay = (0.05) ** (1.0 / target_episode)
         
         print(f"\n>>> STARTING TRIAL {trial.number} <<<")
@@ -257,7 +271,8 @@ def optimize_specialist(cancer_name, data_path, n_trials=30, total_episodes=1000
     print(f"\n[INFO] Saved optimal parameters to {config_path}")
         
     final_episodes = 1500
-    final_decay = (0.05) ** (1.0 / int(0.8 * final_episodes))
+    # SLOWER DECAY: Explore for 95% of the final training run
+    final_decay = (0.05) ** (1.0 / int(0.95 * final_episodes))
         
     print("\n" + "="*60)
     print(f" RETRAINING FINAL AGENT WITH OPTIMAL PARAMETERS")
@@ -293,7 +308,8 @@ def run_standard_training(cancer_name, data_path, total_episodes):
     else:
         print(f"\n[WARNING] No optimal parameters found in 'config/'. Using default values.")
         
-    final_decay = (0.05) ** (1.0 / int(0.8 * total_episodes))
+    # SLOWER DECAY: Explore for 95% of the total episodes
+    final_decay = (0.05) ** (1.0 / int(0.95 * total_episodes))
     
     print("\n" + "="*60)
     print(f" LAUNCHING STANDARD TRAINING: {cancer_name}")

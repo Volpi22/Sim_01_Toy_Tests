@@ -141,13 +141,15 @@ class PredictiveChemoEnv(gym.Env):
         # Continuous Pharmacodynamics (Drug acts on the diseased tissue)
         true_ph, true_temp = self.engine.apply_pharmacodynamics(diseased_ph, diseased_temp)
         
-        # Track Toxicity metrics
+        # Track Toxicity metrics (WITH CLEARANCE DECAY)
         c_safe = self.engine.drug['C_safe']
         clearance_zone_conc = self.engine.C[self.engine.drug['clearance_zone']]
         step_tox = max(0, clearance_zone_conc - c_safe)
-        self.total_toxicity += step_tox
         
-        # Dynamic Event-Triggered Evaluation Loop
+        # Modification 1: Toxicity decays by 1% every minute (Biological Recovery)
+        self.total_toxicity = (self.total_toxicity * 0.99) + step_tox
+        
+        # Dynamic Event-Triggered Evaluation Loop (Heuristic Timer)
         self.minutes_since_last_aggregation += 1
         is_aggregation_event = (self.minutes_since_last_aggregation >= self.next_aggregation_target)
         
@@ -157,18 +159,17 @@ class PredictiveChemoEnv(gym.Env):
             visible_ph = np.copy(true_ph)
             visible_temp = np.copy(true_temp)
             
-            # Cross-check for transient dropouts using forward-filling
             for z in range(20):
                 if np.isnan(visible_ph[z]): visible_ph[z] = self.last_valid_ph[z]
                 if np.isnan(visible_temp[z]): visible_temp[z] = self.last_valid_temp[z]
                 
             self.minutes_since_last_aggregation = 0
-            self.next_aggregation_target = random.randint(12, 16)
+            self.next_aggregation_target = random.randint(10, 18)
             
             self.last_valid_ph = np.copy(visible_ph)
             self.last_valid_temp = np.copy(visible_temp)
         else:
-            # Mode B: Swarm is accumulating packets. Stream raw 1-minute noisy telemetry.
+            # Mode B: Swarm is accumulating packets. Stream raw noisy telemetry.
             confidence_flag = 0.0
             
             raw_noise_ph = np.random.normal(0, 0.02, 20)
@@ -176,7 +177,6 @@ class PredictiveChemoEnv(gym.Env):
             visible_ph = true_ph + raw_noise_ph
             visible_temp = true_temp + raw_noise_temp
             
-            # Forward-Filling for dropouts
             for z in range(20):
                 if np.isnan(base_ph[z]) or np.isnan(visible_ph[z]):
                     visible_ph[z] = self.last_valid_ph[z]
@@ -188,41 +188,36 @@ class PredictiveChemoEnv(gym.Env):
                 else:
                     self.last_valid_temp[z] = visible_temp[z]
 
-        # Calculate Reward based on ground truth
+        # --- REWARD CALCULATION OVERHAUL ---
         curr_dist = self._calc_tumor_distance(true_ph, true_temp)
         
-        # 1. Therapeutic Efficacy (Velocity of healing)
-        efficacy = -(curr_dist - self.prev_distance)
+        # Modification 2: Pure Delta-Based Reward
+        # Positive if distance shrinks (getting healthier), negative if it grows
+        distance_reduction = self.prev_distance - curr_dist
         self.prev_distance = curr_dist
+        efficacy_reward = 200.0 * distance_reduction
         
-        # 2. The "Pathological Footprint" Penalty
-        disease_penalty = 1.0 * curr_dist
-        
-        # We set the reference denominator to 75% of the max threshold to account for drug inertia.
-        # At exactly 75% toxicity, the ratio is 1.0, and the penalty multiplier (200.0) 
-        # cancels out the maximum efficacy reward (200.0), creating a mathematical equilibrium.
+        # Progressive Toxicity Barrier
         warning_threshold = 0.75 * self.critical_toxicity_threshold
         risk_ratio = self.total_toxicity / warning_threshold
-        
-        # If toxicity > 75%, risk_ratio > 1, and the cubic exponent makes the penalty explode.
         toxicity_penalty = 200.0 * step_tox * (risk_ratio ** 3)
         
-        # 3. Asymmetric & Quadratic Shock Penalty
+        # Asymmetric & Quadratic Shock Penalty
         if dose_diff > 0:
             smoothing_penalty = 50.0 * (dose_diff ** 2)
         else:
             smoothing_penalty = 25.0 * (dose_diff ** 2)
             
-        # 4. Total Reward Calculation
-        reward = (200.0 * efficacy) - disease_penalty - toxicity_penalty - smoothing_penalty
+        # Total Reward: Efficacy minus Penalties (Constant disease penalty removed!)
+        reward = efficacy_reward - toxicity_penalty - smoothing_penalty
         
         self.current_step += 1
         terminated = self.total_toxicity > self.critical_toxicity_threshold 
         truncated = self.current_step >= self.max_steps 
         
         if terminated: 
-            # Death penalty
-            reward -= 10000 
+            # Modification 3: Sane terminal penalty
+            reward -= 500.0 
             
         # Normalizing the inputs for the neural network
         tz_idx = self.tumor_zone - 1
@@ -232,7 +227,6 @@ class PredictiveChemoEnv(gym.Env):
         
         current_obs = np.array([z_ph, z_temp, norm_tox, self.current_dose, confidence_flag], dtype=np.float32)
         
-        # Pass the real unnormalized values back so the evaluation dashboard can plot them
         info = {'real_ph': true_ph[tz_idx], 'real_temp': true_temp[tz_idx]}
         
         return current_obs, reward, terminated, truncated, info
