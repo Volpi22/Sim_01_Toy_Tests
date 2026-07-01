@@ -36,9 +36,9 @@ class PredictiveChemoEnv(gym.Env):
             9: 1.10
         }
         
-        # State Space: A single minute's telemetry packet (43-D array)
-        # Features: [pH(20), Temp(20), Toxicity(1), Dose(1), Confidence_Flag(1)]
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(43,), dtype=np.float32)
+        # State Space: A single minute's telemetry packet (5-D array)
+        # Features: [Tumor_pH(1), Tumor_Temp(1), Toxicity(1), Dose(1), Confidence_Flag(1)]
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(5,), dtype=np.float32)
         
         self.max_steps = 240 
         self.critical_toxicity_threshold = 50.0
@@ -62,7 +62,7 @@ class PredictiveChemoEnv(gym.Env):
         
         # Track asynchronous aggregation intervals dynamically
         self.minutes_since_last_aggregation = 0
-        self.next_aggregation_target = random.randint(10, 18)
+        self.next_aggregation_target = random.randint(12, 16)
         
         start_idx = random.randint(0, self.max_available_minute)
         self.session_data = self.schedule_df.iloc[start_idx : start_idx + 255].values
@@ -98,9 +98,13 @@ class PredictiveChemoEnv(gym.Env):
         
         self.prev_distance = self._calc_tumor_distance(diseased_start_ph, diseased_start_temp)
         
-        # Return initial diseased observation packet (Confidence_Flag = 1.0)
-        initial_obs = np.concatenate([diseased_start_ph, diseased_start_temp, [0.0, 1.0, 1.0]])
-        return initial_obs.astype(np.float32), {}
+        # Normalizing the inputs (Z-scores for telemetry, fractions for dose/tox)
+        z_ph = (diseased_start_ph[tz_idx] - self.mu_B_ph[tz_idx]) / 0.05
+        z_temp = (diseased_start_temp[tz_idx] - self.mu_B_temp[tz_idx]) / 0.2
+        norm_tox = self.total_toxicity / self.critical_toxicity_threshold
+        
+        initial_obs = np.array([z_ph, z_temp, norm_tox, self.current_dose, 1.0], dtype=np.float32)
+        return initial_obs, {}
 
     def _calc_tumor_distance(self, ph_array, temp_array):
         tz_idx = self.tumor_zone - 1
@@ -159,7 +163,7 @@ class PredictiveChemoEnv(gym.Env):
                 if np.isnan(visible_temp[z]): visible_temp[z] = self.last_valid_temp[z]
                 
             self.minutes_since_last_aggregation = 0
-            self.next_aggregation_target = random.randint(10, 18)
+            self.next_aggregation_target = random.randint(12, 16)
             
             self.last_valid_ph = np.copy(visible_ph)
             self.last_valid_temp = np.copy(visible_temp)
@@ -220,6 +224,15 @@ class PredictiveChemoEnv(gym.Env):
             # Death penalty
             reward -= 10000 
             
-        current_obs = np.concatenate([visible_ph, visible_temp, [self.total_toxicity, self.current_dose, confidence_flag]])
+        # Normalizing the inputs for the neural network
+        tz_idx = self.tumor_zone - 1
+        z_ph = (visible_ph[tz_idx] - self.mu_B_ph[tz_idx]) / 0.05
+        z_temp = (visible_temp[tz_idx] - self.mu_B_temp[tz_idx]) / 0.2
+        norm_tox = self.total_toxicity / self.critical_toxicity_threshold
         
-        return current_obs.astype(np.float32), reward, terminated, truncated, {}
+        current_obs = np.array([z_ph, z_temp, norm_tox, self.current_dose, confidence_flag], dtype=np.float32)
+        
+        # Pass the real unnormalized values back so the evaluation dashboard can plot them
+        info = {'real_ph': true_ph[tz_idx], 'real_temp': true_temp[tz_idx]}
+        
+        return current_obs, reward, terminated, truncated, info

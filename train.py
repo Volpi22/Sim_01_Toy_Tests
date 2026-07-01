@@ -45,7 +45,7 @@ CANCER_PROFILES = {
 
 class DRQN(nn.Module):
     """Deep Recurrent Q-Network Architecture for Multi-Rate Signal Fusion."""
-    def __init__(self, input_dim=43, num_actions=10, hidden_dim=256):
+    def __init__(self, input_dim=5, num_actions=10, hidden_dim=256):
         super(DRQN, self).__init__()
         self.hidden_dim = hidden_dim
         
@@ -98,8 +98,8 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500,
     )
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    policy_net = DRQN(input_dim=43, num_actions=10).to(device)
-    target_net = DRQN(input_dim=43, num_actions=10).to(device)
+    policy_net = DRQN(input_dim=5, num_actions=10).to(device)
+    target_net = DRQN(input_dim=5, num_actions=10).to(device)
     target_net.load_state_dict(policy_net.state_dict())
     
     optimizer = optim.Adam(policy_net.parameters(), lr=lr)
@@ -142,31 +142,34 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500,
         # DRQN Sequence Optimization Step
         if len(buffer) > batch_size:
             samples = buffer.sample(batch_size)
-            
-            # 1. Clear old gradients
             optimizer.zero_grad()
             
             for seq in samples:
-                states = torch.FloatTensor(np.array([t[0] for t in seq])).unsqueeze(0).to(device)
+                # THE FIX: Create a continuous sequence of length T+1
+                # This ensures the LSTM's hidden state perfectly aligns for current and next states
+                states = [t[0] for t in seq] + [seq[-1][3]] 
+                states_tensor = torch.FloatTensor(np.array(states)).unsqueeze(0).to(device)
+                
                 actions = torch.LongTensor(np.array([t[1] for t in seq])).unsqueeze(0).unsqueeze(-1).to(device)
                 rewards = torch.FloatTensor(np.array([t[2] for t in seq])).unsqueeze(0).to(device)
-                next_states = torch.FloatTensor(np.array([t[3] for t in seq])).unsqueeze(0).to(device)
                 dones = torch.FloatTensor(np.array([t[4] for t in seq])).unsqueeze(0).to(device)
                 
-                q_values, _ = policy_net(states)
-                next_q_values, _ = target_net(next_states)
+                # Pass the ENTIRE sequence through the networks once
+                all_q_values, _ = policy_net(states_tensor)
+                with torch.no_grad():
+                    all_target_q, _ = target_net(states_tensor)
+                    
+                # Slice the sequences to mathematically align t and t+1
+                q_values = all_q_values[:, :-1, :]       
+                next_q_values = all_target_q[:, 1:, :]   
                 
                 state_action_values = q_values.gather(2, actions).squeeze(-1)
                 expected_state_action_values = rewards + (gamma * next_q_values.max(dim=2)[0] * (1 - dones))
                 
-                # 2. Calculate loss for this SINGLE sequence and scale it down by batch size
                 seq_loss = nn.MSELoss()(state_action_values, expected_state_action_values.detach())
                 seq_loss = seq_loss / batch_size
-                
-                # 3. Backpropagate
                 seq_loss.backward()
             
-            # 4. Step the optimizer once all gradients from the batch are safely accumulated
             optimizer.step()
             
         # 5. Periodic Target Network Update

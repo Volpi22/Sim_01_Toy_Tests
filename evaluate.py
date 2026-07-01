@@ -59,13 +59,15 @@ def run_scenario(env, model, device, scenario_name):
             q_vals, hidden = model(obs_tensor, hidden)
             action = q_vals[0, 0, :].argmax().item()
             
-        next_obs, reward, terminated, truncated, _ = env.step(action)
+        next_obs, reward, terminated, truncated, info = env.step(action)
         
         history['time'].append(env.current_step)
-        history['tumor_ph'].append(next_obs[tz_idx])
-        history['tumor_temp'].append(next_obs[tz_idx + 20])
-        history['toxicity'].append(next_obs[40])
-        history['dose'].append(next_obs[41] * 100)
+        
+        # Safely extract the real clinical values for plotting
+        history['tumor_ph'].append(info['real_ph'])
+        history['tumor_temp'].append(info['real_temp'])
+        history['toxicity'].append(next_obs[2] * env.critical_toxicity_threshold) # Un-normalize
+        history['dose'].append(next_obs[3] * 100) # Un-normalize
         
         obs = next_obs
         total_reward += reward
@@ -85,7 +87,7 @@ def run_metrics_evaluation(cancer_name, model_path, data_path, num_patients=100)
     )
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = DRQN(input_dim=43, num_actions=10).to(device)
+    model = DRQN(input_dim=5, num_actions=10).to(device)
     
     if not os.path.exists(model_path):
         print(f"[ERROR] Model file not found at {model_path}. Skipping...")
@@ -176,7 +178,7 @@ def evaluate_specialist(cancer_name, model_path, data_path):
     )
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = DRQN(input_dim=43, num_actions=10).to(device)
+    model = DRQN(input_dim=5, num_actions=10).to(device)
     
     if not os.path.exists(model_path):
         print(f"[ERROR] Model file not found at {model_path}. Skipping...")
