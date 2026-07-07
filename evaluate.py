@@ -41,8 +41,7 @@ def run_scenario(env, model, device, scenario_name):
     terminated = False
     truncated = False
     total_reward = 0
-    
-    tz_idx = env.tumor_zone - 1
+    max_tox_observed = 0.0
     
     history = {
         'time': [],
@@ -72,6 +71,9 @@ def run_scenario(env, model, device, scenario_name):
         action_counts[action] += 1
             
         next_obs, reward, terminated, truncated, info = env.step(action)
+
+        current_tox = next_obs[60] * env.critical_toxicity_threshold
+        max_tox_observed = max(max_tox_observed, current_tox)
         
         # Profile the reward components every 10 minutes
         if env.current_step % 10 == 0:
@@ -99,7 +101,11 @@ def run_scenario(env, model, device, scenario_name):
     print(f"Final Action Distribution: {action_counts.astype(int).tolist()}")
     print(f"{'-'*90}\n")
         
-    return history, total_reward, terminated
+    # Calculate if they failed based on this scenario's specific threshold
+    scenario_threshold = env.critical_toxicity_threshold
+    actually_failed = max_tox_observed >= scenario_threshold
+    
+    return history, total_reward, actually_failed, scenario_threshold
 
 
 def run_frozen_ai_evaluation(cancer_name, model_path, data_path, num_episodes=100):
@@ -236,11 +242,12 @@ def evaluate_specialist(cancer_name, model_path, data_path):
     # 1. Run all scenarios
     for scenario in scenarios:
         print(f"Running Scenario: {scenario}...")
-        history, reward, terminated = run_scenario(env, model, device, scenario)
+        history, reward, failed, spec_threshold = run_scenario(env, model, device, scenario)
         results[scenario] = {
             'history': history,
             'reward': reward,
-            'failed': terminated,
+            'failed': failed,
+            'threshold': spec_threshold,
             'final_tox': history['toxicity'][-1]
         }
 
@@ -257,50 +264,56 @@ def evaluate_specialist(cancer_name, model_path, data_path):
             f.write(f"--- {scenario} ---\n")
             f.write(f"Outcome       : {status}\n")
             f.write(f"Total Reward  : {res['reward']:.2f}\n")
-            f.write(f"Final Toxicity: {res['final_tox']:.2f} / {env.critical_toxicity_threshold}\n\n")
+            f.write(f"Final Toxicity: {res['final_tox']:.2f} / {res['threshold']:.1f}\n\n")
             
     print(f"\n[INFO] Stress report saved to {report_path}")
 
     # 3. Generate Comparative Dashboard
-    plot_comparative_dashboard(cancer_name, results, scenarios, healthy_baseline_ph, healthy_baseline_temp, env.critical_toxicity_threshold)
+    plot_comparative_dashboard(cancer_name, results, scenarios, healthy_baseline_ph, healthy_baseline_temp)
 
-def plot_comparative_dashboard(cancer_name, results, scenarios, healthy_ph, healthy_temp, tox_threshold):
-    """Generates a 12-panel (4x3) comparative dashboard."""
+def plot_comparative_dashboard(cancer_name, results, scenarios, healthy_ph, healthy_temp):
+    """Generates a 12-panel (4x3) comparative dashboard with smoothed telemetry."""
     plt.style.use('dark_background')
     fig, axs = plt.subplots(4, 3, figsize=(18, 14), sharex='col', sharey='row')
     fig.suptitle(f'AI Clinical Stress Tests: {cancer_name.replace("_", " ")}', fontsize=18, fontweight='bold', y=0.98)
 
     for col, scenario in enumerate(scenarios):
         history = results[scenario]['history']
+        threshold = results[scenario]['threshold']
+        
+        # Smooth the clearance organ data (10-minute rolling average)
+        smoothed_clearance = pd.Series(history['clearance_temp']).rolling(window=10, min_periods=1).mean()
         
         # Column Titles
         axs[0, col].set_title(scenario, fontsize=14, fontweight='bold', pad=10)
         
         # Plot 1: pH (Row 0)
-        axs[0, col].plot(history['time'], history['tumor_ph'], color='cyan', linewidth=2)
-        axs[0, col].axhline(y=healthy_ph, color='lime', linestyle='--', alpha=0.7)
-        axs[0, col].grid(True, alpha=0.2)
+        axs[0, col].plot(history['time'], history['tumor_ph'], color='#00FFFF', linewidth=2) # Bright Cyan
+        axs[0, col].axhline(y=healthy_ph, color='#32CD32', linestyle='--', alpha=0.8) # Lime Green baseline
+        axs[0, col].grid(True, alpha=0.15)
         if col == 0: axs[0, col].set_ylabel('Tumor pH')
 
         # Plot 2: Temp (Row 1)
-        axs[1, col].plot(history['time'], history['tumor_temp'], color='tomato', linewidth=2, label='Tumor')
-        axs[1, col].plot(history['time'], history['clearance_temp'], color='yellow', linewidth=2, linestyle=':', label='Clearance Organ')
-        axs[1, col].axhline(y=healthy_temp, color='lime', linestyle='--', alpha=0.7)
-        axs[1, col].grid(True, alpha=0.2)
+        axs[1, col].plot(history['time'], history['tumor_temp'], color='#FF4500', linewidth=2, label='Tumor') # OrangeRed
+        axs[1, col].plot(history['time'], smoothed_clearance, color='#FFD700', linewidth=2, alpha=0.8, label='Clearance Organ (Smoothed)') # Gold
+        axs[1, col].axhline(y=healthy_temp, color='#32CD32', linestyle='--', alpha=0.8)
+        axs[1, col].grid(True, alpha=0.15)
         if col == 0: 
             axs[1, col].set_ylabel('Temp (°C)')
-            axs[1, col].legend(loc='upper right', fontsize=8)
+            axs[1, col].legend(loc='upper right', fontsize=10)
 
         # Plot 3: Dose (Row 2)
-        axs[2, col].step(history['time'], history['dose'], color='magenta', linewidth=2, where='post')
+        axs[2, col].step(history['time'], history['dose'], color='#FF00FF', linewidth=2, where='post') # Magenta
         axs[2, col].set_ylim(-5, 115) 
-        axs[2, col].grid(True, alpha=0.2)
+        axs[2, col].grid(True, alpha=0.15)
         if col == 0: axs[2, col].set_ylabel('Infusion Dose (%)')
 
         # Plot 4: Toxicity (Row 3)
-        axs[3, col].plot(history['time'], history['toxicity'], color='orange', linewidth=2)
-        axs[3, col].axhline(y=tox_threshold, color='red', linestyle='-', linewidth=2)
-        axs[3, col].grid(True, alpha=0.2)
+        # Color red if it failed, orange if safe
+        tox_color = '#FF0000' if results[scenario]['failed'] else '#FFA500'
+        axs[3, col].plot(history['time'], history['toxicity'], color=tox_color, linewidth=2)
+        axs[3, col].axhline(y=threshold, color='#FF0000', linestyle='-', linewidth=2, alpha=0.7)
+        axs[3, col].grid(True, alpha=0.15)
         axs[3, col].set_xlabel('Simulation Time (Minutes)')
         if col == 0: axs[3, col].set_ylabel('Systemic Toxicity')
 

@@ -78,14 +78,18 @@ class DigitalPatientEngine:
         ce_tumor = self.Ce[tz_idx + 1] 
         ec50 = 0.70 * c_safe
         
-        # Use the dynamic attributes
         hill_fraction = (ce_tumor ** self.gamma) / ((ec50 ** self.gamma) + (ce_tumor ** self.gamma) + 1e-8)
         
-        # Use the dynamic attributes
-        growth = self.tumor_growth_rate * self.tumor_mass * (1.0 - self.tumor_mass) 
-        kill = 0.05 * hill_fraction * self.tumor_mass              
+        # 1. Regrowth (Always pushes back, never permanently dies)
+        growth = self.tumor_growth_rate * max(0.05, self.tumor_mass) * (1.0 - self.tumor_mass) 
         
-        self.tumor_mass = np.clip(self.tumor_mass + growth - kill, 0.0, 1.0)
+        # 2. Dynamic Stage-Based Resistance (Norton-Simon derived)
+        # Large mass = highly resistant (0.1x multiplier). Small mass = vulnerable (1.0x multiplier).
+        stage_multiplier = (1.1 - self.tumor_mass)
+        kill = 0.05 * hill_fraction * max(0.01, self.tumor_mass) * stage_multiplier              
+        
+        # Enforce a 5% floor so the cancer always tries to bounce back if treatment stops
+        self.tumor_mass = np.clip(self.tumor_mass + growth - kill, 0.05, 1.0)
         
         # --- MAP TO PHYSIOLOGY ---
         current_ph = np.copy(base_ph_array)

@@ -7,6 +7,7 @@ Deep Recurrent Q-Network (DRQN) with Truncated Backpropagation Through Time.
 """
 
 import os
+import json
 import argparse
 import random
 import numpy as np
@@ -14,9 +15,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import optuna
-import matplotlib.pyplot as plt  # <-- Added for plotting
+import matplotlib.pyplot as plt
 from collections import deque
 from environment import PredictiveChemoEnv
+
+#torch.set_num_threads(torch.get_num_threads()) # Uncomment this line if running on GPU
+torch.backends.mkldnn.enabled = False            # Comment this line if running on GPU
 
 # Clinical Targets mapping anatomical zones and primary chemotherapies
 CANCER_PROFILES = {
@@ -79,7 +83,6 @@ def evaluate_deterministic_policy(env, policy_net, device):
 def train_drqn_specialist(cancer_name, data_path, total_episodes=1500, trial=None, **kwargs):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # --- FIXED ENVIRONMENT INSTANTIATION ---
     env = PredictiveChemoEnv(
         schedule_parquet_path=data_path,
         drug_name=CANCER_PROFILES[cancer_name]['drug'],
@@ -90,18 +93,21 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500, trial=Non
     target_net = DRQN(input_dim=63, num_actions=10).to(device)
     target_net.load_state_dict(policy_net.state_dict())
 
-    # --- VALIDATED HYPERPARAMETERS ---
-    optimizer = optim.Adam(policy_net.parameters(), lr=1e-4) 
+    # --- DYNAMIC HYPERPARAMETERS ---
+    # Uses kwargs if provided (via config JSON or Optuna), otherwise defaults to the validated baseline
+    lr = kwargs.get('lr', 1e-4)
+    gamma = kwargs.get('gamma', 0.99)
+    batch_size = kwargs.get('batch_size', 16)
+    epsilon_decay = kwargs.get('epsilon_decay', 0.995)
+
+    optimizer = optim.Adam(policy_net.parameters(), lr=lr) 
     buffer = EpisodeReplayBuffer(capacity=500) 
     
-    batch_size = 16
-    gamma = 0.99
     epsilon = 1.0
     epsilon_min = 0.05
-    epsilon_decay = 0.995 # Slower decay for 1500 episodes
     
     best_eval_return = -float('inf')
-    training_history = []  # <-- ADDED FOR PLOTTING
+    training_history = [] 
     os.makedirs("models", exist_ok=True)
 
     for episode_idx in range(1, total_episodes + 1):
@@ -131,10 +137,9 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500, trial=Non
             obs = next_obs
 
         buffer.push(ep_history)
-        training_history.append(episode_reward)  # <-- RECORD REWARD FOR PLOT
+        training_history.append(episode_reward)  
         epsilon = max(epsilon_min, epsilon * epsilon_decay)
 
-        # --- VALIDATED OPTIMIZATION BLOCK (DDQN + HUBER + CLIP + FULL EP) ---
         if len(buffer) > batch_size:
             samples = buffer.sample(batch_size)
             optimizer.zero_grad()
@@ -177,7 +182,6 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500, trial=Non
             
             avg_q = state_action_values.mean().item()
 
-        # Target Update (Validated Interval)
         if episode_idx % 10 == 0:
             target_net.load_state_dict(policy_net.state_dict())
 
@@ -185,7 +189,6 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500, trial=Non
         if trial is None and episode_idx % 10 == 0 and len(buffer) > batch_size:
             uniq_a = len(np.unique(ep_actions))
             
-            # --- FIXED SURVIVAL CHECK ---
             survival = "ALIVE" if env.total_toxicity < env.critical_toxicity_threshold else "DEAD "
             
             log_str = (
@@ -196,7 +199,7 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500, trial=Non
             )
             print(log_str)
             
-        # --- BEST MODEL CHECKPOINTING GATE ---
+        # Best Model Checkpointing
         if episode_idx % 50 == 0 and len(buffer) > batch_size:
             eval_return = evaluate_deterministic_policy(env, policy_net, device)
             is_best = ""
@@ -210,12 +213,10 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500, trial=Non
             print(f">>> EVALUATION EP {episode_idx:4d} | Det. Return: {eval_return:7.2f}{is_best}")
             print(f"{'-'*90}")
 
-    return best_eval_return, training_history  # <-- NOW RETURNS HISTORY TOO
+    return best_eval_return, training_history 
 
 
 def optuna_objective(trial, cancer_name, data_path):
-    # Optuna logic remains in the file for future use, but won't interfere 
-    # with our standard hardcoded variables due to **kwargs absorption.
     lr = trial.suggest_float('lr', 1e-5, 1e-3, log=True)
     gamma = trial.suggest_float('gamma', 0.90, 0.999)
     batch_size = trial.suggest_categorical('batch_size', [8, 16, 32])
@@ -234,20 +235,26 @@ def optuna_objective(trial, cancer_name, data_path):
     return score
 
 
-def run_standard_training(cancer_name, data_path, total_episodes):
+def run_standard_training(cancer_name, data_path, total_episodes, **kwargs):
     print(f"Starting Standard Training for {cancer_name}...")
-    
-    # Catch both returned variables
-    best_score, history = train_drqn_specialist(cancer_name, data_path, total_episodes=total_episodes)
+    if kwargs:
+        print(f"Using Parameters: {kwargs}")
+    else:
+        print("Using Default Parameters.")
+        
+    best_score, history = train_drqn_specialist(
+        cancer_name, 
+        data_path, 
+        total_episodes=total_episodes, 
+        **kwargs
+    )
     
     # --- PLOTTING THE TRAINING CURVE ---
     plt.style.use('dark_background')
     plt.figure(figsize=(10, 5))
     
-    # Plot raw episode rewards
     plt.plot(history, color='cyan', alpha=0.3, label='Episode Reward')
     
-    # Plot a 50-episode moving average for readability
     if len(history) >= 50:
         moving_avg = np.convolve(history, np.ones(50)/50, mode='valid')
         plt.plot(range(49, len(history)), moving_avg, color='lime', linewidth=2, label='50-Ep Moving Avg')
@@ -276,6 +283,10 @@ if __name__ == "__main__":
 
     dataset_path = "datasets/1_week_sampling_schedule.parquet"
     
+    # Changed output directory to config/
+    os.makedirs("config", exist_ok=True)
+    param_file = f"config/{args.cancer}_best_params.json"
+    
     if not os.path.exists(dataset_path):
         print(f"[ERROR] Dataset not found at {dataset_path}. Please generate it first.")
         exit(1)
@@ -283,8 +294,25 @@ if __name__ == "__main__":
     if args.optimize:
         print(f"Running Optuna Hyperparameter Optimization for {args.cancer}...")
         study = optuna.create_study(direction='maximize')
-        study.optimize(lambda trial: optuna_objective(trial, args.cancer, dataset_path), n_trials=20)
-        print("\nBest Trial:")
-        print(study.best_trial.params)
+        # Hardcoded n_trials to 30 as requested
+        study.optimize(lambda trial: optuna_objective(trial, args.cancer, dataset_path), n_trials=30)
+        
+        best_params = study.best_trial.params
+        print(f"\nOptimization Complete! Best Parameters: {best_params}")
+        
+        with open(param_file, 'w') as f:
+            json.dump(best_params, f)
+            
+        print(f"Saved optimal parameters to {param_file}. Launching full training...")
+        run_standard_training(args.cancer, dataset_path, args.episodes, **best_params)
+
     else:
-        run_standard_training(args.cancer, dataset_path, args.episodes)
+        # Check if the config file exists and load it, else run with defaults
+        if os.path.exists(param_file):
+            print(f"[INFO] Loading optimized parameters from {param_file}...")
+            with open(param_file, 'r') as f:
+                loaded_params = json.load(f)
+            run_standard_training(args.cancer, dataset_path, args.episodes, **loaded_params)
+        else:
+            print(f"[WARNING] Parameter file {param_file} not found. Running with hardcoded defaults.")
+            run_standard_training(args.cancer, dataset_path, args.episodes)
