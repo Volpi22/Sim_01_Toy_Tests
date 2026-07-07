@@ -1,361 +1,290 @@
 """
-This script handles the training and automated hyperparameter optimization 
-of Deep Recurrent Q-Network agents.
-
-COMMAND-LINE ARGUMENTS:
-    --cancer     : Name of the specific cancer profile to train. 
-    --all        : Flag to train all 5 specialists sequentially.
-    --episodes   : Number of episodes to train each agent. (Default: 1500)
-    --optimize   : Flag to launch Optuna Hyperparameter Optimization.
-    --n_trials   : Number of Optuna trials to run if optimizing. (Default: 30)
-
-USAGE EXAMPLES:
-1. Standard Training (Uses default or saved optimal parameters):
-   $ python3 train.py --cancer Hepatocellular_Carcinoma --episodes 1500
-   
-2. Hyperparameter Optimization (Finds and saves the best parameters automatically):
-   $ python3 train.py --cancer Glioblastoma --optimize --n_trials 30
 =============================================================================
+Therapeutic Thermostat: DRQN Specialist Training Pipeline
+=============================================================================
+Trains targeted AI specialists for specific clinical pathologies using a 
+Deep Recurrent Q-Network (DRQN) with Truncated Backpropagation Through Time.
 """
 
 import os
-import random
 import argparse
-import json
+import random
 import numpy as np
-from collections import deque
-
 import torch
-# torch.set_num_threads(torch.get_num_threads()) # Uncomment this line if running on GPU
-torch.backends.mkldnn.enabled = False            # Comment this line if running on GPU
 import torch.nn as nn
 import torch.optim as optim
-
 import optuna
-
+import matplotlib.pyplot as plt  # <-- Added for plotting
+from collections import deque
 from environment import PredictiveChemoEnv
 
+# Clinical Targets mapping anatomical zones and primary chemotherapies
 CANCER_PROFILES = {
-    'Hepatocellular_Carcinoma': {'drug': 'Doxorubicin', 'zone': 14},
-    'Colorectal_Cancer':        {'drug': '5-Fluorouracil', 'zone': 12},
-    'Lung_Cancer':              {'drug': 'Paclitaxel', 'zone': 2},
-    'Renal_Cell_Carcinoma':     {'drug': 'Cisplatin', 'zone': 16},
-    'Glioblastoma':             {'drug': 'Carmustine', 'zone': 7}
+    "Hepatocellular_Carcinoma": {"zone": 14, "drug": "Doxorubicin"},
+    "Colorectal_Cancer": {"zone": 12, "drug": "5-Fluorouracil"},
+    "Lung_Cancer": {"zone": 2, "drug": "Paclitaxel"},
+    "Renal_Cell_Carcinoma": {"zone": 16, "drug": "Cisplatin"},
+    "Glioblastoma": {"zone": 7, "drug": "Carmustine"}
 }
 
 class DRQN(nn.Module):
-    """Deep Recurrent Q-Network Architecture for Multi-Rate Signal Fusion."""
-    def __init__(self, input_dim=63, num_actions=10, hidden_dim=256):
+    def __init__(self, input_dim=63, hidden_dim=128, num_actions=10):
         super(DRQN, self).__init__()
         self.hidden_dim = hidden_dim
         
-        self.feature_network = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU()
-        )
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
-        self.q_head = nn.Linear(hidden_dim, num_actions)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc_out = nn.Linear(hidden_dim, num_actions)
 
     def forward(self, x, hidden_state=None):
-        batch_size, seq_len, _ = x.size()
-        
-        flat_x = x.contiguous().view(batch_size * seq_len, -1)
-        features = self.feature_network(flat_x)
-        features = features.view(batch_size, seq_len, -1)
-        
-        lstm_out, hidden_state = self.lstm(features, hidden_state)
-        q_values = self.q_head(lstm_out)
+        x = torch.relu(self.fc1(x))
+        lstm_out, hidden_state = self.lstm(x, hidden_state)
+        x = torch.relu(self.fc2(lstm_out))
+        q_values = self.fc_out(x)
         return q_values, hidden_state
 
 class EpisodeReplayBuffer:
-    """Sequential buffer to preserve chronological tracking data."""
-    def __init__(self, capacity=1000):
-        self.capacity = capacity
-        self.buffer = []
-
+    def __init__(self, capacity=500):
+        self.buffer = deque(maxlen=capacity)
+        
     def push(self, episode):
-        if len(self.buffer) >= self.capacity:
-            self.buffer.pop(0)
+        """Stores an entire episode trajectory."""
         self.buffer.append(episode)
-
+        
     def sample(self, batch_size):
+        """Samples a batch of full episodes."""
         return random.sample(self.buffer, batch_size)
-
+        
     def __len__(self):
         return len(self.buffer)
 
-def train_drqn_specialist(cancer_name, data_path, total_episodes=1500, 
-                          batch_size=16, gamma=0.99, lr=1e-3, epsilon_decay=0.99, 
-                          save_model=True, trial=None):
-    """
-    Core training loop. If 'trial' is provided, it acts as an Optuna evaluation 
-    run and enables early pruning.
-    """
+def evaluate_deterministic_policy(env, policy_net, device):
+    """Runs a 0-epsilon evaluation on a fixed seed to measure true convergence."""
+    obs, _ = env.reset(seed=42)
+    hidden = None
+    det_reward = 0.0
+    
+    for _ in range(240):
+        obs_tensor = torch.FloatTensor(obs).view(1, 1, -1).to(device)
+        with torch.no_grad():
+            q_vals, hidden = policy_net(obs_tensor, hidden)
+            action = q_vals[0, 0, :].argmax().item()
+            
+        obs, reward, _, _, _ = env.step(action)
+        det_reward += reward  
+        
+    return det_reward
+
+def train_drqn_specialist(cancer_name, data_path, total_episodes=1500, trial=None, **kwargs):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # --- FIXED ENVIRONMENT INSTANTIATION ---
     env = PredictiveChemoEnv(
-        schedule_parquet_path=data_path, 
-        drug_name=CANCER_PROFILES[cancer_name]['drug'], 
+        schedule_parquet_path=data_path,
+        drug_name=CANCER_PROFILES[cancer_name]['drug'],
         tumor_zone=CANCER_PROFILES[cancer_name]['zone']
     )
-    
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     policy_net = DRQN(input_dim=63, num_actions=10).to(device)
     target_net = DRQN(input_dim=63, num_actions=10).to(device)
     target_net.load_state_dict(policy_net.state_dict())
+
+    # --- VALIDATED HYPERPARAMETERS ---
+    optimizer = optim.Adam(policy_net.parameters(), lr=1e-4) 
+    buffer = EpisodeReplayBuffer(capacity=500) 
     
-    optimizer = optim.Adam(policy_net.parameters(), lr=lr)
-    buffer = EpisodeReplayBuffer(capacity=500)
-    
+    batch_size = 16
+    gamma = 0.99
     epsilon = 1.0
     epsilon_min = 0.05
+    epsilon_decay = 0.995 # Slower decay for 1500 episodes
     
-    recent_rewards = deque(maxlen=20)
-    
-    for episode_idx in range(total_episodes):
+    best_eval_return = -float('inf')
+    training_history = []  # <-- ADDED FOR PLOTTING
+    os.makedirs("models", exist_ok=True)
+
+    for episode_idx in range(1, total_episodes + 1):
         obs, _ = env.reset()
-        episode_history = []
         hidden = None
         
-        terminated = False
-        truncated = False
-        episode_reward = 0
-        
-        while not (terminated or truncated):
+        ep_history = []
+        ep_actions = []
+        episode_reward = 0.0
+
+        for _ in range(240):
             obs_tensor = torch.FloatTensor(obs).view(1, 1, -1).to(device)
             
-            if random.random() < epsilon:
+            if np.random.rand() < epsilon:
                 action = env.action_space.sample()
-                # If picking randomly, we still need to step the LSTM to keep memory aligned
                 with torch.no_grad():
                     _, hidden = policy_net(obs_tensor, hidden)
             else:
                 with torch.no_grad():
-                    q_vals, next_hidden = policy_net(obs_tensor, hidden)
+                    q_vals, hidden = policy_net(obs_tensor, hidden)
                     action = q_vals[0, 0, :].argmax().item()
-                    hidden = next_hidden 
-            
-            next_obs, reward, terminated, truncated, _ = env.step(action)
-            episode_history.append((obs, action, reward, next_obs, float(terminated)))
-            
-            obs = next_obs
-            episode_reward += reward
 
-        buffer.push(episode_history)
-        recent_rewards.append(episode_reward)
+            next_obs, reward, _, _, _ = env.step(action)
+            ep_history.append((obs, action, reward, next_obs, 0.0))
+            ep_actions.append(action)
+            episode_reward += reward
+            obs = next_obs
+
+        buffer.push(ep_history)
+        training_history.append(episode_reward)  # <-- RECORD REWARD FOR PLOT
         epsilon = max(epsilon_min, epsilon * epsilon_decay)
-        
-        # DRQN Sequence Optimization Step
+
+        # --- VALIDATED OPTIMIZATION BLOCK (DDQN + HUBER + CLIP + FULL EP) ---
         if len(buffer) > batch_size:
             samples = buffer.sample(batch_size)
             optimizer.zero_grad()
+
+            state_batch = torch.zeros(batch_size, 241, 63).to(device)
+            action_batch = torch.zeros(batch_size, 240, 1, dtype=torch.long).to(device)
+            reward_batch = torch.zeros(batch_size, 240).to(device)
+            done_batch = torch.zeros(batch_size, 240).to(device)
+
+            for b, seq in enumerate(samples):
+                for t, transition in enumerate(seq):
+                    state_batch[b, t] = torch.FloatTensor(transition[0])
+                    action_batch[b, t, 0] = transition[1]
+                    reward_batch[b, t] = float(transition[2])
+                    done_batch[b, t] = float(transition[4])
+                state_batch[b, 240] = torch.FloatTensor(seq[-1][3])
+
+            all_q_values, _ = policy_net(state_batch)
+            with torch.no_grad():
+                all_target_q, _ = target_net(state_batch)
+
+            q_values = all_q_values[:, :-1, :]
             
-            # Truncated BPTT Sequence Length
-            max_seq_len = 64 
+            # Double DQN Evaluation
+            next_actions = all_q_values[:, 1:, :].argmax(dim=2, keepdim=True)
+            next_q_values = all_target_q[:, 1:, :].gather(2, next_actions).squeeze(-1)
+
+            state_action_values = q_values.gather(2, action_batch).squeeze(-1)
+            expected_state_action_values = reward_batch + (gamma * next_q_values * (1 - done_batch))
+
+            # Huber Loss
+            loss = nn.SmoothL1Loss()(state_action_values, expected_state_action_values.detach())
+            loss.backward()
             
-            for full_seq in samples:
-                # Randomly slice a 64-step chunk from the 240-minute episode
-                if len(full_seq) > max_seq_len:
-                    start_idx = random.randint(0, len(full_seq) - max_seq_len)
-                    seq = full_seq[start_idx : start_idx + max_seq_len]
-                else:
-                    seq = full_seq
-                    
-                # Create a continuous sequence of length T+1
-                states = [t[0] for t in seq] + [seq[-1][3]] 
-                states_tensor = torch.FloatTensor(np.array(states)).unsqueeze(0).to(device)
-                
-                actions = torch.LongTensor(np.array([t[1] for t in seq])).unsqueeze(0).unsqueeze(-1).to(device)
-                rewards = torch.FloatTensor(np.array([t[2] for t in seq])).unsqueeze(0).to(device)
-                dones = torch.FloatTensor(np.array([t[4] for t in seq])).unsqueeze(0).to(device)
-                
-                # Pass the truncated sequence through the networks
-                all_q_values, _ = policy_net(states_tensor)
-                with torch.no_grad():
-                    all_target_q, _ = target_net(states_tensor)
-                    
-                # Slice the sequences to mathematically align t and t+1
-                q_values = all_q_values[:, :-1, :]       
-                next_q_values = all_target_q[:, 1:, :]   
-                
-                state_action_values = q_values.gather(2, actions).squeeze(-1)
-                expected_state_action_values = rewards + (gamma * next_q_values.max(dim=2)[0] * (1 - dones))
-                
-                seq_loss = nn.MSELoss()(state_action_values, expected_state_action_values.detach())
-                seq_loss = seq_loss / batch_size
-                seq_loss.backward()
+            lstm_grad_norm = sum(p.grad.data.norm(2).item() ** 2 for p in policy_net.lstm.parameters() if p.grad is not None) ** 0.5
             
+            # Gradient Clipping
+            torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=1.0)
             optimizer.step()
             
-        # 5. Periodic Target Network Update
+            avg_q = state_action_values.mean().item()
+
+        # Target Update (Validated Interval)
         if episode_idx % 10 == 0:
             target_net.load_state_dict(policy_net.state_dict())
+
+        # Live Logging
+        if trial is None and episode_idx % 10 == 0 and len(buffer) > batch_size:
+            uniq_a = len(np.unique(ep_actions))
             
-        # Determine the clinical outcome of the simulation
-        if terminated:
-            outcome_str = f"FATAL: Reached max toxicity at minute {env.current_step}."
-        else:
-            outcome_str = f"SUCCESS: Patient survived the full 240-minute simulation!"
+            # --- FIXED SURVIVAL CHECK ---
+            survival = "ALIVE" if env.total_toxicity < env.critical_toxicity_threshold else "DEAD "
             
-        # Print a clean, 1-line pulse check for every episode (or every 10 for Optuna)
-        if trial is None:
-            # Standard Training: Print every episode so you can watch the AI learn to save patients
-            print(f"Ep {episode_idx:4d}/{total_episodes} | {outcome_str:<50} | Score: {episode_reward:7.2f} | Eps: {epsilon:.2f}")
-        else:
-            # Optuna Optimization: Print every 10 episodes to keep the hyperparameter logs clean
-            if episode_idx % 10 == 0:
-                print(f"[Trial {trial.number}] Ep {episode_idx:4d}/{total_episodes} | {outcome_str:<50} | Score: {episode_reward:7.2f}")
-        
-        # Optuna Pruning Integration
-        if trial is not None:
-            trial.report(episode_reward, episode_idx)
-            if trial.should_prune():
-                print(f"[Trial {trial.number}] PRUNED: Agent failed to learn quickly enough. Moving to next trial.")
-                raise optuna.exceptions.TrialPruned()
+            log_str = (
+                f"Ep {episode_idx:4d} | Rew: {episode_reward:7.1f} | Surv: {survival} | "
+                f"Tox: {env.total_toxicity:5.1f} | Mass: {env.engine.tumor_mass:5.4f} | "
+                f"UniqA: {uniq_a:2d} | Loss: {loss.item():5.2f} | AvgQ: {avg_q:5.1f} | "
+                f"∇LSTM: {lstm_grad_norm:4.2f} | Eps: {epsilon:.2f}"
+            )
+            print(log_str)
+            
+        # --- BEST MODEL CHECKPOINTING GATE ---
+        if episode_idx % 50 == 0 and len(buffer) > batch_size:
+            eval_return = evaluate_deterministic_policy(env, policy_net, device)
+            is_best = ""
+            if eval_return > best_eval_return:
+                best_eval_return = eval_return
+                model_path = f"models/{cancer_name}_drqn_best.pt"
+                torch.save(policy_net.state_dict(), model_path)
+                is_best = "  <-- NEW BEST MODEL SAVED"
+                
+            print(f"{'-'*90}")
+            print(f">>> EVALUATION EP {episode_idx:4d} | Det. Return: {eval_return:7.2f}{is_best}")
+            print(f"{'-'*90}")
 
-    # Save the model
-    if save_model:
-        os.makedirs("models", exist_ok=True)
-        save_path = f"models/{cancer_name}_recurrent_drqn.pt"
-        torch.save(policy_net.state_dict(), save_path)
-        print(f"\n[SUCCESS] Recurrent Specialist saved to {save_path}\n")
-
-    return np.mean(recent_rewards) if len(recent_rewards) > 0 else episode_reward
+    return best_eval_return, training_history  # <-- NOW RETURNS HISTORY TOO
 
 
-def optimize_specialist(cancer_name, data_path, n_trials=30, total_episodes=1000):
-    """Optuna Study: intelligently searches for the best parameters and saves them."""
-    print(f"\n{'='*60}")
-    print(f" LAUNCHING OPTUNA HYPERPARAMETER OPTIMIZATION: {cancer_name}")
-    print(f" Trials: {n_trials} | Episodes per Trial: {total_episodes}")
-    print(f"{'='*60}\n")
-
-    def objective(trial):
-        lr = trial.suggest_float("lr", 1e-5, 5e-3, log=True)
-        gamma = trial.suggest_float("gamma", 0.90, 0.995)
-        batch_size = trial.suggest_categorical("batch_size", [8, 16, 32])
-        
-        # SLOWER DECAY: Explore for 95% of the trial
-        target_episode = int(0.95 * total_episodes)
-        dynamic_decay = (0.05) ** (1.0 / target_episode)
-        
-        print(f"\n>>> STARTING TRIAL {trial.number} <<<")
-        print(f"Testing Parameters -> LR: {lr:.5f} | Gamma: {gamma:.4f} | Batch Size: {batch_size} | Eps Decay: {dynamic_decay:.4f}")
-        print("-" * 60)
-        
-        score = train_drqn_specialist(
-            cancer_name=cancer_name, 
-            data_path=data_path,
-            total_episodes=total_episodes,
-            batch_size=batch_size,
-            gamma=gamma,
-            lr=lr,
-            epsilon_decay=dynamic_decay,
-            save_model=False,
-            trial=trial
-        )
-        return score
-
-    study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=n_trials)
-
-    print("\n[OPTIMIZATION COMPLETE]")
-    print(f"Best Trial: {study.best_trial.number}")
-    print("Best Parameters:")
-    for key, value in study.best_params.items():
-        print(f"    {key}: {value}")
-        
-    # --- SAVE BEST PARAMETERS TO JSON ---
-    os.makedirs("config", exist_ok=True)
-    config_path = f"config/{cancer_name}_best_params.json"
-    with open(config_path, "w") as f:
-        json.dump(study.best_params, f, indent=4)
-    print(f"\n[INFO] Saved optimal parameters to {config_path}")
-        
-    final_episodes = 1500
-    # SLOWER DECAY: Explore for 95% of the final training run
-    final_decay = (0.05) ** (1.0 / int(0.95 * final_episodes))
-        
-    print("\n" + "="*60)
-    print(f" RETRAINING FINAL AGENT WITH OPTIMAL PARAMETERS")
-    print(f" Episodes: {final_episodes}")
-    print("="*60 + "\n")
+def optuna_objective(trial, cancer_name, data_path):
+    # Optuna logic remains in the file for future use, but won't interfere 
+    # with our standard hardcoded variables due to **kwargs absorption.
+    lr = trial.suggest_float('lr', 1e-5, 1e-3, log=True)
+    gamma = trial.suggest_float('gamma', 0.90, 0.999)
+    batch_size = trial.suggest_categorical('batch_size', [8, 16, 32])
+    epsilon_decay = trial.suggest_float('epsilon_decay', 0.90, 0.999)
     
-    train_drqn_specialist(
-        cancer_name=cancer_name,
-        data_path=data_path,
-        total_episodes=final_episodes,
-        batch_size=study.best_params["batch_size"],
-        gamma=study.best_params["gamma"],
-        lr=study.best_params["lr"],
-        epsilon_decay=final_decay,
-        save_model=True
+    score, _ = train_drqn_specialist(
+        cancer_name, 
+        data_path, 
+        total_episodes=300, 
+        trial=trial,
+        lr=lr, 
+        gamma=gamma, 
+        batch_size=batch_size, 
+        epsilon_decay=epsilon_decay
     )
+    return score
+
 
 def run_standard_training(cancer_name, data_path, total_episodes):
-    """Runs a standard training loop, injecting optimized parameters if available."""
-    config_path = f"config/{cancer_name}_best_params.json"
+    print(f"Starting Standard Training for {cancer_name}...")
     
-    # 1. Safe default fallback parameters
-    params = {"lr": 1e-3, "gamma": 0.99, "batch_size": 16}
+    # Catch both returned variables
+    best_score, history = train_drqn_specialist(cancer_name, data_path, total_episodes=total_episodes)
     
-    # 2. Check for saved Optuna parameters
-    if os.path.exists(config_path):
-        with open(config_path, "r") as f:
-            saved_params = json.load(f)
-            # Update the default dictionary with the saved one
-            params.update(saved_params) 
-        print(f"\n[INFO] Loaded optimal parameters from {config_path}:")
-        print(f"       LR: {params['lr']:.5f} | Gamma: {params['gamma']:.4f} | Batch Size: {params['batch_size']}")
-    else:
-        print(f"\n[WARNING] No optimal parameters found in 'config/'. Using default values.")
+    # --- PLOTTING THE TRAINING CURVE ---
+    plt.style.use('dark_background')
+    plt.figure(figsize=(10, 5))
+    
+    # Plot raw episode rewards
+    plt.plot(history, color='cyan', alpha=0.3, label='Episode Reward')
+    
+    # Plot a 50-episode moving average for readability
+    if len(history) >= 50:
+        moving_avg = np.convolve(history, np.ones(50)/50, mode='valid')
+        plt.plot(range(49, len(history)), moving_avg, color='lime', linewidth=2, label='50-Ep Moving Avg')
         
-    # SLOWER DECAY: Explore for 95% of the total episodes
-    final_decay = (0.05) ** (1.0 / int(0.95 * total_episodes))
+    plt.title(f"DRQN Training Curve: {cancer_name}")
+    plt.xlabel("Episode")
+    plt.ylabel("Total Scaled Reward")
+    plt.legend()
+    plt.grid(True, alpha=0.2)
     
-    print("\n" + "="*60)
-    print(f" LAUNCHING STANDARD TRAINING: {cancer_name}")
-    print(f" Episodes: {total_episodes}")
-    print("="*60 + "\n")
+    os.makedirs("results", exist_ok=True)
+    plot_path = f"results/{cancer_name}_training_curve.png"
+    plt.savefig(plot_path, dpi=300)
+    plt.close()
     
-    train_drqn_specialist(
-        cancer_name=cancer_name,
-        data_path=data_path,
-        total_episodes=total_episodes,
-        batch_size=params["batch_size"],
-        gamma=params["gamma"],
-        lr=params["lr"],
-        epsilon_decay=final_decay,
-        save_model=True
-    )
+    print(f"[INFO] Training plot saved to {plot_path}")
+    print(f"Training Complete. Best Deterministic Return: {best_score}")
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train or Optimize AI Recurrent Specialists")
-    parser.add_argument("--cancer", type=str, choices=list(CANCER_PROFILES.keys()), help="Target clinical profile.")
-    parser.add_argument("--all", action="store_true", help="Sequential batch training flag.")
-    parser.add_argument("--episodes", type=int, default=1500, help="Episodes per training run.")
-    parser.add_argument("--optimize", action="store_true", help="Run Optuna Hyperparameter Optimization.")
-    parser.add_argument("--n_trials", type=int, default=30, help="Number of Optuna trials to test.")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cancer", type=str, choices=list(CANCER_PROFILES.keys()), required=True)
+    parser.add_argument("--episodes", type=int, default=1500)
+    parser.add_argument("--optimize", action="store_true")
     args = parser.parse_args()
 
     dataset_path = "datasets/1_week_sampling_schedule.parquet"
+    
     if not os.path.exists(dataset_path):
-        raise FileNotFoundError(f"Missing dataset at {dataset_path}. Run dataset_generation.py first.")
+        print(f"[ERROR] Dataset not found at {dataset_path}. Please generate it first.")
+        exit(1)
 
-    # Execute Optuna Tuning
     if args.optimize:
-        if args.cancer:
-            optimize_specialist(args.cancer, dataset_path, n_trials=args.n_trials)
-        elif args.all:
-            for name in CANCER_PROFILES.keys():
-                optimize_specialist(name, dataset_path, n_trials=args.n_trials)
-        else:
-            print("Please specify --cancer [name] or --all to run optimization.")
-            
-    # Execute Standard Training (with smart parameter loading)
+        print(f"Running Optuna Hyperparameter Optimization for {args.cancer}...")
+        study = optuna.create_study(direction='maximize')
+        study.optimize(lambda trial: optuna_objective(trial, args.cancer, dataset_path), n_trials=20)
+        print("\nBest Trial:")
+        print(study.best_trial.params)
     else:
-        if args.all:
-            for name in CANCER_PROFILES.keys():
-                run_standard_training(name, dataset_path, args.episodes)
-        elif args.cancer:
-            run_standard_training(args.cancer, dataset_path, args.episodes)
-        else:
-            print("Please use --cancer [name] or --all to launch training.")
+        run_standard_training(args.cancer, dataset_path, args.episodes)

@@ -4,6 +4,7 @@ Solves the continuous mass-balance ODEs, models Pharmacodynamic delay (Hysteresi
 and handles Hemodynamic stress responses.
 """
 import numpy as np
+import copy
 from utils import DataManager
 
 class DigitalPatientEngine:
@@ -11,14 +12,18 @@ class DigitalPatientEngine:
         self.Q_base = DataManager.get_advection_matrix()
         self.V = np.array([DataManager.VOLUMES.get(i, 1.0) for i in range(21)])
         
-        self.C = np.zeros(21)  # Blood Plasma Concentration
-        self.Ce = np.zeros(21) # Tissue Effect-Site Concentration (Hysteresis)
+        self.C = np.zeros(21)  
+        self.Ce = np.zeros(21) 
         
-        self.drug = DataManager.DRUGS[drug_name]
-        self.pd = DataManager.PD_SHIFTS[drug_name]
+        # DEEP COPY to prevent mutating the global DataManager dictionary
+        self.drug = copy.deepcopy(DataManager.DRUGS[drug_name])
+        self.pd = copy.deepcopy(DataManager.PD_SHIFTS[drug_name])
         
-        # Biological delay constant for drug diffusing into tissues (approx 10 min half-life)
         self.k_e0 = 0.1 
+        self.tumor_mass = 1.0  
+        
+        self.gamma = 4.0
+        self.tumor_growth_rate = 0.006
 
     def step_pharmacokinetics(self, infusion_rate_pct, dt_minutes=1.0, injection_zone=20, cardiac_multiplier=1.0):
         """
@@ -60,30 +65,41 @@ class DigitalPatientEngine:
             
         return self.C
 
-    def apply_pharmacodynamics(self, base_ph_array, base_temp_array):
+    def apply_pharmacodynamics(self, base_ph_array, base_temp_array, tz_idx, max_ph_offset, max_temp_offset):
         """
-        1. Applies the primary therapeutic shift driven by the EFFECT COMPARTMENT (Ce).
-        2. Applies secondary physiological side effects (Fever/Acidosis) if local plasma 
-           toxicity exceeds safe thresholds.
+        1. Translates Effect Compartment (Ce) into Tumor Mass reduction (Hill equation).
+        2. Simulates natural tumor regrowth.
+        3. Maps the latent Tumor Mass into observable physiological pH/Temp offsets.
+        4. Applies secondary toxicity side effects.
         """
-        # 1. Primary Therapeutic Effect
-        current_ph = base_ph_array + (self.pd['eta_ph'] * self.Ce[1:])
-        current_temp = base_temp_array + (self.pd['eta_temp'] * self.Ce[1:])
-        
-        # 2. Secondary Systemic Side Effects (Toxicity-Induced)
         c_safe = self.drug['C_safe']
         
+        # --- LATENT TUMOR DYNAMICS ---
+        ce_tumor = self.Ce[tz_idx + 1] 
+        ec50 = 0.70 * c_safe
+        
+        # Use the dynamic attributes
+        hill_fraction = (ce_tumor ** self.gamma) / ((ec50 ** self.gamma) + (ce_tumor ** self.gamma) + 1e-8)
+        
+        # Use the dynamic attributes
+        growth = self.tumor_growth_rate * self.tumor_mass * (1.0 - self.tumor_mass) 
+        kill = 0.05 * hill_fraction * self.tumor_mass              
+        
+        self.tumor_mass = np.clip(self.tumor_mass + growth - kill, 0.0, 1.0)
+        
+        # --- MAP TO PHYSIOLOGY ---
+        current_ph = np.copy(base_ph_array)
+        current_temp = np.copy(base_temp_array)
+        
+        current_ph[tz_idx] += (self.tumor_mass * max_ph_offset)
+        current_temp[tz_idx] += (self.tumor_mass * max_temp_offset)
+        
+        # --- SECONDARY TOXICITY EFFECTS ---
         for i in range(20):
-            plasma_conc = self.C[i + 1] # 1-based indexing in the C array
-            
-            # If the local organ's concentration exceeds the safe limit, apply side effects
+            plasma_conc = self.C[i + 1] 
             if plasma_conc > c_safe:
                 tox_overage = plasma_conc - c_safe
-                
-                # Side Effect 1: Drug-induced localized fever (+0.5 °C per unit of severe overage)
                 current_temp[i] += (0.50 * tox_overage)
-                
-                # Side Effect 2: Drug-induced metabolic acidosis (-0.2 pH per unit of severe overage)
                 current_ph[i] -= (0.20 * tox_overage)
         
         return current_ph, current_temp

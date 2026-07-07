@@ -8,7 +8,7 @@ import random
 class PredictiveChemoEnv(gym.Env):
     """
     Real-Time Asynchronous Event-Driven DRQN Sensor Fusion Environment.
-    Streams a single 43-D vector every minute. Recurrent memory layers (LSTM) 
+    Streams a single 63-D vector every minute. Recurrent memory layers (LSTM) 
     in the agent handle historical trajectories implicitly.
     """
     def __init__(self, schedule_parquet_path, drug_name='Doxorubicin', tumor_zone=14):
@@ -24,102 +24,90 @@ class PredictiveChemoEnv(gym.Env):
         # 4-9: Fine-tuned increments for precision targeting
         self.action_space = spaces.Discrete(10)
         self.action_mapping = {
-            0: 0.00,  # Emergency Stop (Pause Infusion)
-            1: 0.25,  # Quarter Dose
-            2: 0.50,  # Half Dose
-            3: 0.75,  # Three-Quarter Dose
-            4: 0.85,  # Precision adjustments:
-            5: 0.90,
-            6: 0.95,
-            7: 1.00,  # Nominal Prescribed Dose
-            8: 1.05,
-            9: 1.10
+            0: 0.0, 1: 0.25, 2: 0.50, 3: 0.75, 
+            4: 0.85, 5: 0.90, 6: 0.95, 7: 1.00, 
+            8: 1.05, 9: 1.10
         }
         
-        # State Space: A single minute's telemetry packet (63-D array)
-        # Features: [pH_1..20, Temp_1..20, Tox_1..20, Total_Sys_Tox(1), Dose(1), Confidence_Flag(1)]
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(63,), dtype=np.float32)
+        self.observation_space = spaces.Box(
+            low=-10.0, high=10.0, 
+            shape=(63,), dtype=np.float32
+        )
         
-        self.max_steps = 240 
-        self.critical_toxicity_threshold = 50.0
-
+        self.engine = DigitalPatientEngine()
+        
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         
-        # Randomizes the patient's metabolic clearance rate by +/- 20%
-        # A value of 0.80 means sluggish kidneys; 1.20 means highly efficient clearance.
-        self.patient_clearance_factor = np.random.uniform(0.80, 1.20)
+        if seed is not None:
+            np.random.seed(seed)
+            random.seed(seed)
+            
+        start_min = random.randint(0, self.max_available_minute)
+        end_min = start_min + 255 
         
-        self.engine = DigitalPatientEngine(drug_name=self.drug_name)
+        self.session_data = self.schedule_df.iloc[start_min:end_min].values
         
-        # Mutates the engine's copy of the drug constants for this episode's specific patient.
-        if hasattr(self.engine, 'drug') and 'k_elim' in self.engine.drug:
-            self.engine.drug['k_elim'] *= self.patient_clearance_factor
+        patient_clearance_variance = np.random.uniform(0.80, 1.20)
+        self.patient_clearance_factor = patient_clearance_variance
+        
+        self.engine = DigitalPatientEngine()
+        self.engine.drug['k_elim'] *= patient_clearance_variance
         
         self.current_step = 0
-        self.total_toxicity = 0.0
+        self.max_steps = 240
         self.current_dose = 0.0
         
-        # Track asynchronous aggregation intervals dynamically
-        self.minutes_since_last_aggregation = 0
-        self.next_aggregation_target = random.randint(12, 16)
+        self.mu_B_ph = np.mean(self.session_data[0:15, 0:20], axis=0)
+        self.mu_B_temp = np.mean(self.session_data[0:15, 20:40], axis=0)
         
-        start_idx = random.randint(0, self.max_available_minute)
-        self.session_data = self.schedule_df.iloc[start_idx : start_idx + 255].values
-        
-        baseline_ph_buffer = []
-        baseline_temp_buffer = []
-        
-        for i in range(15):
-            raw_ph = self.session_data[i, 0:20]
-            raw_temp = self.session_data[i, 20:40]
-            baseline_ph_buffer.append(raw_ph)
-            baseline_temp_buffer.append(raw_temp)
-            
-        self.mu_B_ph = np.nanmedian(baseline_ph_buffer, axis=0)
-        self.mu_B_temp = np.nanmedian(baseline_temp_buffer, axis=0)
-
-        # Inject the Warburg Effect (Pathology) ---
-        self.disease_ph_offset = np.zeros(20)
-        self.disease_temp_offset = np.zeros(20)
+        self.total_toxicity = 0.0
+        self.critical_toxicity_threshold = 50.0 
         
         tz_idx = self.tumor_zone - 1
-        # Tumor is highly acidic (-0.6 pH) and hyperthermic (+1.0 C)
-        self.disease_ph_offset[tz_idx] = -0.6
-        self.disease_temp_offset[tz_idx] = +1.0
+        initial_ph = self.mu_B_ph[tz_idx] - 0.6
+        initial_temp = self.mu_B_temp[tz_idx] + 1.0
         
-        # Add the disease to the baseline for our starting anchors
-        diseased_start_ph = self.mu_B_ph + self.disease_ph_offset
-        diseased_start_temp = self.mu_B_temp + self.disease_temp_offset
+        self.prev_distance = np.sqrt(
+            ((initial_ph - self.mu_B_ph[tz_idx]) / 0.05)**2 + 
+            ((initial_temp - self.mu_B_temp[tz_idx]) / 0.2)**2
+        )
         
-        # Establish anchors for clinical forward-filling
-        self.last_valid_ph = np.copy(diseased_start_ph)
-        self.last_valid_temp = np.copy(diseased_start_temp)
+        self.last_valid_ph = np.copy(self.session_data[15, 0:20])
+        self.last_valid_temp = np.copy(self.session_data[15, 20:40])
         self.last_valid_tox = np.zeros(20)
         
-        self.prev_distance = self._calc_tumor_distance(diseased_start_ph, diseased_start_temp)
+        self.minutes_since_last_aggregation = 0
+        self.next_aggregation_target = random.randint(10, 18)
         
-        # Whole-Body Normalization
-        z_ph_all = (diseased_start_ph - self.mu_B_ph) / 0.05
-        z_temp_all = (diseased_start_temp - self.mu_B_temp) / 0.2
-        norm_tox_all = np.zeros(20) # 0 dose at start
-        norm_total_tox = self.total_toxicity / self.critical_toxicity_threshold
+        # --- NEW: BIOLOGICAL RESISTANCE FLAG ---
+        self.is_resistant = False 
         
-        # 63-D Initial Observation
-        initial_obs = np.concatenate([
-            z_ph_all, z_temp_all, norm_tox_all, 
-            [norm_total_tox, self.current_dose, 1.0]
-        ]).astype(np.float32)
-        
-        return initial_obs, {}
+        return self._get_obs(confidence_flag=1.0), {}
 
-    def _calc_tumor_distance(self, ph_array, temp_array):
+    def _calc_tumor_distance(self, current_ph, current_temp):
         tz_idx = self.tumor_zone - 1
-        z_ph = (ph_array[tz_idx] - self.mu_B_ph[tz_idx]) / 0.05
-        z_temp = (temp_array[tz_idx] - self.mu_B_temp[tz_idx]) / 0.2
+        z_ph = (current_ph[tz_idx] - self.mu_B_ph[tz_idx]) / 0.05
+        z_temp = (current_temp[tz_idx] - self.mu_B_temp[tz_idx]) / 0.2
         return np.sqrt(z_ph**2 + z_temp**2)
 
+    def _get_obs(self, confidence_flag):
+        z_ph = (self.last_valid_ph - self.mu_B_ph) / 0.05
+        z_temp = (self.last_valid_temp - self.mu_B_temp) / 0.2
+        norm_tox = self.last_valid_tox / self.engine.drug['C_safe']
+        norm_total_tox = self.total_toxicity / self.critical_toxicity_threshold
+        
+        obs = np.concatenate([
+            z_ph, z_temp, norm_tox, 
+            [norm_total_tox, self.current_dose, confidence_flag]
+        ]).astype(np.float32)
+        return obs
+
     def step(self, action):
+        # --- CRITICAL CARE OVERRIDE ---
+        if self.total_toxicity > self.critical_toxicity_threshold:
+            action = 0
+
         old_dose = self.current_dose
         new_dose = self.action_mapping[action]
         dose_diff = new_dose - old_dose
@@ -132,38 +120,43 @@ class PredictiveChemoEnv(gym.Env):
             
         self.current_dose = new_dose
         
-        # Toxicity-Induced Hemodynamic Shift
         stress_factor = min(0.30, 0.30 * (self.total_toxicity / self.critical_toxicity_threshold))
         cardiac_multiplier = 1.0 + stress_factor
         
-        # Step Physics Engine (1 minute)
         self.engine.step_pharmacokinetics(self.current_dose, cardiac_multiplier=cardiac_multiplier)
         
         data_idx = 15 + self.current_step
         base_ph = self.session_data[data_idx, 0:20]
         base_temp = self.session_data[data_idx, 20:40]
 
-        # Apply the underlying disease pathology to the background noise
-        diseased_ph = base_ph + self.disease_ph_offset
-        diseased_temp = base_temp + self.disease_temp_offset
+        true_ph, true_temp = self.engine.apply_pharmacodynamics(
+            base_ph_array=base_ph, 
+            base_temp_array=base_temp, 
+            tz_idx=self.tumor_zone - 1,
+            max_ph_offset=-0.6,
+            max_temp_offset=+1.0
+        )
         
-        # Continuous Pharmacodynamics (Drug acts on the diseased tissue)
-        true_ph, true_temp = self.engine.apply_pharmacodynamics(diseased_ph, diseased_temp)
+        # --- NEW: ABSOLUTE RESISTANCE OVERRIDE ---
+        if self.is_resistant:
+            tz_idx = self.tumor_zone - 1
+            true_ph[tz_idx] = self.mu_B_ph[tz_idx] - 0.6  # Freeze acidic state
+            true_temp[tz_idx] = self.mu_B_temp[tz_idx] + 1.0  # Freeze fever state
         
-        # Track Toxicity metrics (WITH CLEARANCE DECAY)
-        c_safe = self.engine.drug['C_safe']
+        # --- NEW: CONTINUOUS AUC TOXICITY ACCUMULATION ---
+        # Biological Model: dX/dt = k_damage * C - k_repair * X
         clearance_zone_conc = self.engine.C[self.engine.drug['clearance_zone']]
-        step_tox = max(0, clearance_zone_conc - c_safe)
+        k_damage = 0.5 
+        step_tox = k_damage * clearance_zone_conc
+
+        self.total_toxicity = (self.total_toxicity * 0.99) + step_tox        
         
-        # Ground Truth Instantaneous Toxicity (Concentration in all 20 zones)
         true_tox = self.engine.C[1:21]
         
-        # Dynamic Event-Triggered Evaluation Loop (Heuristic Timer)
         self.minutes_since_last_aggregation += 1
         is_aggregation_event = (self.minutes_since_last_aggregation >= self.next_aggregation_target)
         
         if is_aggregation_event:
-            # Mode A: High-confidence consensus achieved
             confidence_flag = 1.0
             visible_ph = np.copy(true_ph)
             visible_temp = np.copy(true_temp)
@@ -181,12 +174,11 @@ class PredictiveChemoEnv(gym.Env):
             self.last_valid_temp = np.copy(visible_temp)
             self.last_valid_tox = np.copy(visible_tox)
         else:
-            # Mode B: Swarm is accumulating packets. Stream raw noisy telemetry.
             confidence_flag = 0.0
             
             raw_noise_ph = np.random.normal(0, 0.02, 20)
             raw_noise_temp = np.random.normal(0, 0.05, 20)
-            raw_noise_tox = np.random.normal(0, 0.05, 20) # Same hardware error profile as temp
+            raw_noise_tox = np.random.normal(0, 0.05, 20)
             
             visible_ph = true_ph + raw_noise_ph
             visible_temp = true_temp + raw_noise_temp
@@ -208,31 +200,30 @@ class PredictiveChemoEnv(gym.Env):
                 else:
                     self.last_valid_tox[z] = visible_tox[z]
 
-        # --- KEEP REWARD CALCULATION EXACTLY THE SAME ---
         curr_dist = self._calc_tumor_distance(true_ph, true_temp)
         distance_reduction = self.prev_distance - curr_dist
         self.prev_distance = curr_dist
-        efficacy_reward = 200.0 * distance_reduction
+        
+        sickness_penalty = -5.0 * curr_dist
+        efficacy_reward = 500.0 * distance_reduction
         
         warning_threshold = 0.75 * self.critical_toxicity_threshold
         risk_ratio = self.total_toxicity / warning_threshold
-        toxicity_penalty = 200.0 * step_tox * (risk_ratio ** 3)
+        toxicity_penalty = 150.0 * step_tox * (risk_ratio ** 1.5)
         
-        if dose_diff > 0: smoothing_penalty = 50.0 * (dose_diff ** 2)
-        else: smoothing_penalty = 25.0 * (dose_diff ** 2)
+        if dose_diff > 0: smoothing_penalty = 5.0 * (dose_diff ** 2)
+        else: smoothing_penalty = 2.5 * (dose_diff ** 2)
             
-        reward = efficacy_reward - toxicity_penalty - smoothing_penalty
+        reward = efficacy_reward + sickness_penalty - toxicity_penalty - smoothing_penalty
+        reward = reward / 100.0
+        
+        terminated = False 
         
         self.current_step += 1
-        terminated = self.total_toxicity > self.critical_toxicity_threshold 
         truncated = self.current_step >= self.max_steps 
-        
-        if terminated: reward -= 500.0 
             
-        # Normalizing Whole-Body Inputs
         z_ph_all = (visible_ph - self.mu_B_ph) / 0.05
         z_temp_all = (visible_temp - self.mu_B_temp) / 0.2
-        # Normalize local toxicity relative to the safe limit
         norm_tox_all = visible_tox / self.engine.drug['C_safe'] 
         norm_total_tox = self.total_toxicity / self.critical_toxicity_threshold
         
@@ -247,7 +238,13 @@ class PredictiveChemoEnv(gym.Env):
         info = {
             'real_ph': true_ph[tz_idx], 
             'real_temp': true_temp[tz_idx],
-            'clearance_temp': true_temp[clearance_idx]
+            'clearance_temp': true_temp[clearance_idx],
+            'clearance_ph': true_ph[clearance_idx],
+            'drug_concentration': true_tox[tz_idx], 
+            'efficacy_reward': efficacy_reward,       
+            'sickness_penalty': sickness_penalty,     
+            'toxicity_penalty': toxicity_penalty,     
+            'smoothing_penalty': smoothing_penalty
         }
         
         return current_obs, reward, terminated, truncated, info
