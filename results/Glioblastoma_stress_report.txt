@@ -1,0 +1,28 @@
+CLINICAL STRESS TEST REPORT: Glioblastoma
+============================================================
+
+--- Low Growth (Late-Stage) ---
+Outcome       : SUCCESS (Safely Managed)
+Total Reward  : -3.11
+Final Toxicity: 0.62 / 50.0
+
+--- Medium Growth (Typical) ---
+Outcome       : SUCCESS (Safely Managed)
+Total Reward  : -4.49
+Final Toxicity: 0.00 / 50.0
+
+--- High Growth (Early-Stage) ---
+Outcome       : SUCCESS (Safely Managed)
+Total Reward  : -4.76
+Final Toxicity: 0.00 / 50.0
+
+--- Resistance (Dead-End) ---
+Outcome       : SUCCESS (Safely Managed)
+Total Reward  : -4.68
+Final Toxicity: 0.00 / 50.0
+
+--- Toxicity (Slippery Road) ---
+Outcome       : SUCCESS (Safely Managed)
+Total Reward  : -5.01
+Final Toxicity: 0.00 / 37.5
+

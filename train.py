@@ -1,11 +1,3 @@
-"""
-=============================================================================
-Therapeutic Thermostat: DRQN Specialist Training Pipeline
-=============================================================================
-Trains targeted AI specialists for specific clinical pathologies using a 
-Deep Recurrent Q-Network (DRQN) with Truncated Backpropagation Through Time.
-"""
-
 import os
 import json
 import argparse
@@ -19,10 +11,8 @@ import matplotlib.pyplot as plt
 from collections import deque
 from environment import PredictiveChemoEnv
 
-#torch.set_num_threads(torch.get_num_threads()) # Uncomment this line if running on GPU
-torch.backends.mkldnn.enabled = False            # Comment this line if running on GPU
+torch.backends.mkldnn.enabled = False            
 
-# Clinical Targets mapping anatomical zones and primary chemotherapies
 CANCER_PROFILES = {
     "Hepatocellular_Carcinoma": {"zone": 14, "drug": "Doxorubicin"},
     "Colorectal_Cancer": {"zone": 12, "drug": "5-Fluorouracil"},
@@ -32,10 +22,9 @@ CANCER_PROFILES = {
 }
 
 class DRQN(nn.Module):
-    def __init__(self, input_dim=63, hidden_dim=128, num_actions=10):
+    def __init__(self, input_dim=64, hidden_dim=128, num_actions=10):
         super(DRQN, self).__init__()
         self.hidden_dim = hidden_dim
-        
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.lstm = nn.LSTM(hidden_dim, hidden_dim, batch_first=True)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
@@ -45,56 +34,42 @@ class DRQN(nn.Module):
         x = torch.relu(self.fc1(x))
         lstm_out, hidden_state = self.lstm(x, hidden_state)
         x = torch.relu(self.fc2(lstm_out))
-        q_values = self.fc_out(x)
-        return q_values, hidden_state
+        return self.fc_out(x), hidden_state
 
 class EpisodeReplayBuffer:
     def __init__(self, capacity=500):
         self.buffer = deque(maxlen=capacity)
-        
     def push(self, episode):
-        """Stores an entire episode trajectory."""
         self.buffer.append(episode)
-        
     def sample(self, batch_size):
-        """Samples a batch of full episodes."""
         return random.sample(self.buffer, batch_size)
-        
     def __len__(self):
         return len(self.buffer)
 
-def evaluate_deterministic_policy(env, policy_net, device):
-    """Runs a 0-epsilon evaluation on a fixed seed to measure true convergence."""
-    obs, _ = env.reset(seed=42)
-    hidden = None
-    det_reward = 0.0
-    
-    for _ in range(240):
-        obs_tensor = torch.FloatTensor(obs).view(1, 1, -1).to(device)
-        with torch.no_grad():
-            q_vals, hidden = policy_net(obs_tensor, hidden)
-            action = q_vals[0, 0, :].argmax().item()
-            
-        obs, reward, _, _, _ = env.step(action)
-        det_reward += reward  
-        
-    return det_reward
+def evaluate_deterministic_policy(env, policy_net, device, num_seeds=5):
+    total_det_reward = 0.0
+    for seed in range(42, 42 + num_seeds):
+        obs, _ = env.reset(seed=seed)
+        hidden = None
+        for _ in range(240):
+            obs_tensor = torch.FloatTensor(obs).view(1, 1, -1).to(device)
+            with torch.no_grad():
+                q_vals, hidden = policy_net(obs_tensor, hidden)
+                action = q_vals[0, 0, :].argmax().item()
+            obs, reward, terminated, truncated, _ = env.step(action)
+            total_det_reward += reward  
+            if terminated or truncated:
+                break
+    return total_det_reward / num_seeds
 
-def train_drqn_specialist(cancer_name, data_path, total_episodes=1500, trial=None, **kwargs):
+def train_drqn_specialist(cancer_name, data_path, total_episodes=1000, trial=None, **kwargs):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    env = PredictiveChemoEnv(
-        schedule_parquet_path=data_path,
-        drug_name=CANCER_PROFILES[cancer_name]['drug'],
-        tumor_zone=CANCER_PROFILES[cancer_name]['zone']
-    )
+    env = PredictiveChemoEnv(schedule_parquet_path=data_path, drug_name=CANCER_PROFILES[cancer_name]['drug'], tumor_zone=CANCER_PROFILES[cancer_name]['zone'])
 
-    policy_net = DRQN(input_dim=63, num_actions=10).to(device)
-    target_net = DRQN(input_dim=63, num_actions=10).to(device)
+    policy_net = DRQN(input_dim=64, num_actions=10).to(device)
+    target_net = DRQN(input_dim=64, num_actions=10).to(device)
     target_net.load_state_dict(policy_net.state_dict())
 
-    # --- DYNAMIC HYPERPARAMETERS ---
-    # Uses kwargs if provided (via config JSON or Optuna), otherwise defaults to the validated baseline
     lr = kwargs.get('lr', 1e-4)
     gamma = kwargs.get('gamma', 0.99)
     batch_size = kwargs.get('batch_size', 16)
@@ -102,39 +77,37 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500, trial=Non
 
     optimizer = optim.Adam(policy_net.parameters(), lr=lr) 
     buffer = EpisodeReplayBuffer(capacity=500) 
-    
-    epsilon = 1.0
-    epsilon_min = 0.05
-    
+    epsilon, epsilon_min = 1.0, 0.05
     best_eval_return = -float('inf')
     training_history = [] 
     os.makedirs("models", exist_ok=True)
 
+    # [LOCKED] 60-Minute Burn-in + 120-Minute Learning Window
+    burn_in = 60
+    seq_len = 120
+    total_sample_len = burn_in + seq_len
+
     for episode_idx in range(1, total_episodes + 1):
         obs, _ = env.reset()
         hidden = None
-        
-        ep_history = []
-        ep_actions = []
-        episode_reward = 0.0
+        ep_history, ep_actions, episode_reward = [], [], 0.0
 
         for _ in range(240):
             obs_tensor = torch.FloatTensor(obs).view(1, 1, -1).to(device)
-            
             if np.random.rand() < epsilon:
                 action = env.action_space.sample()
-                with torch.no_grad():
-                    _, hidden = policy_net(obs_tensor, hidden)
+                with torch.no_grad(): _, hidden = policy_net(obs_tensor, hidden)
             else:
                 with torch.no_grad():
                     q_vals, hidden = policy_net(obs_tensor, hidden)
                     action = q_vals[0, 0, :].argmax().item()
 
-            next_obs, reward, _, _, _ = env.step(action)
-            ep_history.append((obs, action, reward, next_obs, 0.0))
+            next_obs, reward, terminated, truncated, _ = env.step(action)
+            ep_history.append((obs, action, reward, next_obs, float(terminated)))
             ep_actions.append(action)
             episode_reward += reward
             obs = next_obs
+            if terminated or truncated: break
 
         buffer.push(ep_history)
         training_history.append(episode_reward)  
@@ -143,78 +116,111 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1500, trial=Non
         if len(buffer) > batch_size:
             samples = buffer.sample(batch_size)
             optimizer.zero_grad()
-
-            state_batch = torch.zeros(batch_size, 241, 63).to(device)
-            action_batch = torch.zeros(batch_size, 240, 1, dtype=torch.long).to(device)
-            reward_batch = torch.zeros(batch_size, 240).to(device)
-            done_batch = torch.zeros(batch_size, 240).to(device)
+            
+            state_batch = torch.zeros(batch_size, seq_len + 1, 64, device=device)
+            action_batch = torch.zeros(batch_size, seq_len, 1, dtype=torch.long, device=device)
+            reward_batch = torch.zeros(batch_size, seq_len, device=device)
+            done_batch = torch.zeros(batch_size, seq_len, device=device)
+            mask = torch.zeros(batch_size, seq_len, device=device)
+            
+            h_0 = torch.zeros(1, batch_size, policy_net.hidden_dim, device=device)
+            c_0 = torch.zeros(1, batch_size, policy_net.hidden_dim, device=device)
 
             for b, seq in enumerate(samples):
-                for t, transition in enumerate(seq):
-                    state_batch[b, t] = torch.FloatTensor(transition[0])
-                    action_batch[b, t, 0] = transition[1]
-                    reward_batch[b, t] = float(transition[2])
-                    done_batch[b, t] = float(transition[4])
-                state_batch[b, 240] = torch.FloatTensor(seq[-1][3])
+                actual_len = len(seq)
+                max_start = max(0, actual_len - total_sample_len)
+                
+                rand_val = random.random()
+                if rand_val < 0.30:
+                    start = random.randint(0, max_start // 3)
+                elif rand_val < 0.70:
+                    start = random.randint(max_start // 3, 2 * (max_start // 3))
+                else:
+                    start = random.randint(2 * (max_start // 3), max_start)
+                
+                actual_burn_in = min(burn_in, actual_len - start)
+                if actual_burn_in > 0:
+                    burn_in_states = (
+                        torch.as_tensor(
+                            np.stack([tr[0] for tr in seq[start:start + actual_burn_in]]),
+                            dtype=torch.float32,
+                            device=device
+                        )
+                        .unsqueeze(0)
+                    )
+                        
+                    with torch.no_grad():
+                        _, (h, c) = policy_net(burn_in_states)
+                        h_0[:, b, :] = h[0]
+                        c_0[:, b, :] = c[0]
+                
+                learn_start = start + burn_in
+                valid_len = min(seq_len, max(0, actual_len - learn_start))
+                
+                if valid_len > 0:
+                    states = np.stack([tr[0] for tr in seq[learn_start:learn_start + valid_len]])
+                    actions = np.array([tr[1] for tr in seq[learn_start:learn_start + valid_len]], dtype=np.int64)
+                    rewards = np.array([tr[2] for tr in seq[learn_start:learn_start + valid_len]], dtype=np.float32)
+                    dones = np.array([tr[4] for tr in seq[learn_start:learn_start + valid_len]], dtype=np.float32)
 
-            all_q_values, _ = policy_net(state_batch)
-            with torch.no_grad():
-                all_target_q, _ = target_net(state_batch)
+                    state_batch[b, :valid_len] = torch.as_tensor(states, dtype=torch.float32, device=device)
+                    action_batch[b, :valid_len, 0] = torch.as_tensor(actions, device=device)
+                    reward_batch[b, :valid_len] = torch.as_tensor(rewards, device=device)
+                    done_batch[b, :valid_len] = torch.as_tensor(dones, device=device)
+                    mask[b, :valid_len] = 1.0  
+
+                if valid_len > 0:
+                    last_transition = seq[learn_start + valid_len - 1]
+                    state_batch[b, valid_len] = torch.as_tensor(
+                        last_transition[3],
+                        dtype=torch.float32,
+                        device=device
+                    )
+
+            hidden_in = (h_0, c_0)
+            all_q_values, _ = policy_net(state_batch, hidden_in)
+            with torch.no_grad(): 
+                all_target_q, _ = target_net(state_batch, hidden_in)
 
             q_values = all_q_values[:, :-1, :]
-            
-            # Double DQN Evaluation
             next_actions = all_q_values[:, 1:, :].argmax(dim=2, keepdim=True)
             next_q_values = all_target_q[:, 1:, :].gather(2, next_actions).squeeze(-1)
 
             state_action_values = q_values.gather(2, action_batch).squeeze(-1)
             expected_state_action_values = reward_batch + (gamma * next_q_values * (1 - done_batch))
 
-            # Huber Loss
-            loss = nn.SmoothL1Loss()(state_action_values, expected_state_action_values.detach())
+            raw_loss = nn.SmoothL1Loss(reduction='none')(state_action_values, expected_state_action_values.detach())
+            loss = (raw_loss * mask).sum() / mask.sum().clamp(min=1.0)
             loss.backward()
             
             lstm_grad_norm = sum(p.grad.data.norm(2).item() ** 2 for p in policy_net.lstm.parameters() if p.grad is not None) ** 0.5
-            
-            # Gradient Clipping
             torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=1.0)
             optimizer.step()
             
-            avg_q = state_action_values.mean().item()
+            avg_q = (state_action_values * mask).sum().item() / max(mask.sum().item(), 1.0)
 
-        if episode_idx % 10 == 0:
-            target_net.load_state_dict(policy_net.state_dict())
+        if episode_idx % 10 == 0: target_net.load_state_dict(policy_net.state_dict())
 
-        # Live Logging
         if trial is None and episode_idx % 10 == 0 and len(buffer) > batch_size:
             uniq_a = len(np.unique(ep_actions))
-            
-            survival = "ALIVE" if env.total_toxicity < env.critical_toxicity_threshold else "DEAD "
-            
             log_str = (
-                f"Ep {episode_idx:4d} | Rew: {episode_reward:7.1f} | Surv: {survival} | "
+                f"Ep {episode_idx:4d} | Rew: {episode_reward:7.1f} | Surv: {'ALIVE' if not terminated else 'DEAD '} | "
                 f"Tox: {env.total_toxicity:5.1f} | Mass: {env.engine.tumor_mass:5.4f} | "
                 f"UniqA: {uniq_a:2d} | Loss: {loss.item():5.2f} | AvgQ: {avg_q:5.1f} | "
                 f"∇LSTM: {lstm_grad_norm:4.2f} | Eps: {epsilon:.2f}"
             )
             print(log_str)
             
-        # Best Model Checkpointing
         if episode_idx % 50 == 0 and len(buffer) > batch_size:
-            eval_return = evaluate_deterministic_policy(env, policy_net, device)
+            eval_return = evaluate_deterministic_policy(env, policy_net, device, num_seeds=5)
             is_best = ""
             if eval_return > best_eval_return:
                 best_eval_return = eval_return
-                model_path = f"models/{cancer_name}_drqn_best.pt"
-                torch.save(policy_net.state_dict(), model_path)
+                torch.save(policy_net.state_dict(), f"models/{cancer_name}_drqn_best.pt")
                 is_best = "  <-- NEW BEST MODEL SAVED"
-                
-            print(f"{'-'*90}")
             print(f">>> EVALUATION EP {episode_idx:4d} | Det. Return: {eval_return:7.2f}{is_best}")
-            print(f"{'-'*90}")
 
     return best_eval_return, training_history 
-
 
 def optuna_objective(trial, cancer_name, data_path):
     lr = trial.suggest_float('lr', 1e-5, 1e-3, log=True)
@@ -234,7 +240,6 @@ def optuna_objective(trial, cancer_name, data_path):
     )
     return score
 
-
 def run_standard_training(cancer_name, data_path, total_episodes, **kwargs):
     print(f"Starting Standard Training for {cancer_name}...")
     if kwargs:
@@ -249,10 +254,8 @@ def run_standard_training(cancer_name, data_path, total_episodes, **kwargs):
         **kwargs
     )
     
-    # --- PLOTTING THE TRAINING CURVE ---
     plt.style.use('dark_background')
     plt.figure(figsize=(10, 5))
-    
     plt.plot(history, color='cyan', alpha=0.3, label='Episode Reward')
     
     if len(history) >= 50:
@@ -273,17 +276,14 @@ def run_standard_training(cancer_name, data_path, total_episodes, **kwargs):
     print(f"[INFO] Training plot saved to {plot_path}")
     print(f"Training Complete. Best Deterministic Return: {best_score}")
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--cancer", type=str, choices=list(CANCER_PROFILES.keys()), required=True)
-    parser.add_argument("--episodes", type=int, default=1500)
+    parser.add_argument("--episodes", type=int, default=1000)
     parser.add_argument("--optimize", action="store_true")
     args = parser.parse_args()
 
     dataset_path = "datasets/1_week_sampling_schedule.parquet"
-    
-    # Changed output directory to config/
     os.makedirs("config", exist_ok=True)
     param_file = f"config/{args.cancer}_best_params.json"
     
@@ -294,7 +294,6 @@ if __name__ == "__main__":
     if args.optimize:
         print(f"Running Optuna Hyperparameter Optimization for {args.cancer}...")
         study = optuna.create_study(direction='maximize')
-        # Hardcoded n_trials to 30 as requested
         study.optimize(lambda trial: optuna_objective(trial, args.cancer, dataset_path), n_trials=30)
         
         best_params = study.best_trial.params
@@ -307,7 +306,6 @@ if __name__ == "__main__":
         run_standard_training(args.cancer, dataset_path, args.episodes, **best_params)
 
     else:
-        # Check if the config file exists and load it, else run with defaults
         if os.path.exists(param_file):
             print(f"[INFO] Loading optimized parameters from {param_file}...")
             with open(param_file, 'r') as f:

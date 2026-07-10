@@ -16,6 +16,8 @@ import random
 import math
 from scipy.stats import binom
 
+debug = False  # Set to True to enable debug print statements, False to disable
+
 # ==========================================
 # DATA MANAGEMENT & PHYSICS CONSTANTS
 # ==========================================
