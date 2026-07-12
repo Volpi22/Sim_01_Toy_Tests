@@ -23,11 +23,24 @@ class PredictiveChemoEnv(gym.Env):
             8: 1.05, 9: 1.10
         }
         
+        # 64 Dimensions: 20 pH, 20 Temp, 20 Tox, and 4 High-Value Globals
         self.observation_space = spaces.Box(
             low=-10.0, high=10.0, 
             shape=(64,), dtype=np.float32
         )
         self.engine = DigitalPatientEngine()
+        
+        # ---------------------------------------------------------
+        # CONFIGURABLE CLINICAL & REWARD CONSTANTS
+        # ---------------------------------------------------------
+        # Default placeholder (Randomized properly in reset)
+        self.toxicity_retention = 0.95
+        
+        # Version A Reward Configuration
+        self.safe_toxicity_threshold = 30.0
+        self.toxicity_scale = 0.05 
+        self.efficacy_scale = 500.0
+        self.critical_toxicity_threshold = 50.0 
         
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -45,7 +58,9 @@ class PredictiveChemoEnv(gym.Env):
         self.engine.drug['k_elim'] *= self.patient_clearance_factor
         
         self.engine.tumor_growth_rate = np.random.uniform(0.015, 0.035)
-        self.organ_recovery_rate = np.random.uniform(0.93, 0.97)
+        
+        # Renamed from organ_recovery_rate for mathematical clarity
+        self.toxicity_retention = np.random.uniform(0.93, 0.97)
         
         self.current_step = 0
         self.max_steps = 240
@@ -55,11 +70,12 @@ class PredictiveChemoEnv(gym.Env):
         self.mu_B_temp = np.mean(self.session_data[0:15, 20:40], axis=0)
         
         self.total_toxicity = 0.0
-        self.critical_toxicity_threshold = 50.0 
         
         tz_idx = self.tumor_zone - 1
-        initial_ph = self.mu_B_ph[tz_idx] - 0.6
-        initial_temp = self.mu_B_temp[tz_idx] + 1.0
+        
+        # Initialization strictly maps to the engine's starting tumor mass (0.85)
+        initial_ph = self.mu_B_ph[tz_idx] + (self.engine.tumor_mass * -0.6)
+        initial_temp = self.mu_B_temp[tz_idx] + (self.engine.tumor_mass * 1.0)
         
         self.prev_distance = np.sqrt(
             ((initial_ph - self.mu_B_ph[tz_idx]) / 0.05)**2 + 
@@ -110,6 +126,9 @@ class PredictiveChemoEnv(gym.Env):
         stress_factor = min(0.30, 0.30 * (self.total_toxicity / self.critical_toxicity_threshold))
         cardiac_multiplier = 1.0 + stress_factor
         
+        # Capture pre-step mass
+        prev_mass = self.engine.tumor_mass
+        
         self.engine.step_pharmacokinetics(self.current_dose, cardiac_multiplier=cardiac_multiplier)
         
         data_idx = 15 + self.current_step
@@ -130,52 +149,103 @@ class PredictiveChemoEnv(gym.Env):
             tz_idx = self.tumor_zone - 1
             true_ph[tz_idx] = self.mu_B_ph[tz_idx] - 0.6  
             true_temp[tz_idx] = self.mu_B_temp[tz_idx] + 1.0  
+            
+        # Capture post-step mass and true delta
+        new_mass = self.engine.tumor_mass
+        delta_mass = new_mass - prev_mass
         
         clearance_idx = self.engine.drug['clearance_zone'] - 1
         clearance_zone_conc = self.engine.C[clearance_idx + 1]
         
         k_damage = 2.0 
         step_tox = k_damage * clearance_zone_conc
-        self.total_toxicity = (self.total_toxicity * self.organ_recovery_rate) + step_tox      
+        
+        # Uses toxicity_retention for mathematically clean decay
+        self.total_toxicity = (self.total_toxicity * self.toxicity_retention) + step_tox      
         true_tox = self.engine.C[1:21]
         
         self.last_valid_ph = np.copy(true_ph)
         self.last_valid_temp = np.copy(true_temp)
         self.last_valid_tox = np.copy(true_tox)
 
+        # Distance bookkeeping
         curr_dist = self._calc_tumor_distance(true_ph, true_temp)
         distance_reduction = self.prev_distance - curr_dist
         self.prev_distance = curr_dist
         
-        risk_ratio = self.total_toxicity / self.critical_toxicity_threshold
+        # ---------------------------------------------------------
+        # VERSION A: QUADRATIC HINGE & STRICT ENCAPSULATION
+        # ---------------------------------------------------------
+        efficacy_reward = self.efficacy_scale * distance_reduction
+        distance_penalty = 0.15 * curr_dist 
         
-        reward = (
-            500.0 * distance_reduction 
-            - 0.15 * curr_dist                           
-            - 150.0 * step_tox * (risk_ratio ** 2.0)    
-            - 2.5 * (dose_diff ** 2)                    
-        )
+        # Toxicity Penalty: Quadratic Hinge
+        tox_overage = max(0.0, self.total_toxicity - self.safe_toxicity_threshold)
+        toxicity_penalty = self.toxicity_scale * (tox_overage ** 2.0)
+        
+        smoothing_penalty = 2.5 * (dose_diff ** 2)
+        
+        reward_raw = (efficacy_reward - distance_penalty - toxicity_penalty - smoothing_penalty)
         
         self.current_step += 1
         terminated = False
         truncated = self.current_step >= self.max_steps 
         
+        terminal_penalty = 0.0
         if self.total_toxicity > self.critical_toxicity_threshold:
             terminated = True
-            reward -= 100.0  
+            terminal_penalty = 100.0
+            reward_raw -= terminal_penalty  
             
-        reward = reward / 100.0
+        reward_scaled = reward_raw / 100.0
         current_obs = self._get_obs()
         
+        # --- LATENT TELEMETRY FOR DEBUGGING ---
         tz_idx = self.tumor_zone - 1
+        ce_tumor = self.engine.Ce[tz_idx + 1]
+        growth_ratio = (self.engine.tumor_growth_rate - 0.005) / 0.045
+        ec50_factor = 0.60 - (0.30 * growth_ratio)
+        ec50 = ec50_factor * self.engine.drug['C_safe']
+        
+        hill_fraction = (ce_tumor ** self.engine.gamma) / ((ec50 ** self.engine.gamma) + (ce_tumor ** self.engine.gamma) + 1e-8)
+        k_eff = 1.0 + 0.2 * np.tanh(prev_mass)
+        growth = self.engine.tumor_growth_rate * prev_mass * np.log(k_eff / max(1e-8, prev_mass))
+        
+        e_max = self.engine.drug.get('Emax', 0.08) 
+        stage_multiplier = (1.1 - prev_mass)
+        kill = e_max * hill_fraction * max(0.01, prev_mass) * stage_multiplier
+        net_growth = growth - kill
+        # --------------------------------------
+
         info = {
             'real_ph': true_ph[tz_idx], 
             'real_temp': true_temp[tz_idx],
             'clearance_temp': true_temp[clearance_idx],
             'clearance_ph': true_ph[clearance_idx],
-            'efficacy_reward': 500.0 * distance_reduction,       
-            'toxicity_penalty': 150.0 * step_tox * (risk_ratio ** 2.0),     
-            'smoothing_penalty': 2.5 * (dose_diff ** 2)
+            
+            # Centralized Bookkeeping
+            'Ce': ce_tumor,
+            'hill': hill_fraction,
+            'growth': growth,
+            'kill': kill,
+            'net_growth': net_growth,
+            'mass': new_mass,
+            'delta_mass': delta_mass,
+            'curr_dist': curr_dist,
+            'distance_reduction': distance_reduction,
+            'step_tox': step_tox,
+            'total_toxicity': self.total_toxicity,
+            
+            # Explicit Reward Variables for Diagnostic
+            'efficacy_scale': self.efficacy_scale,
+            'efficacy_reward': efficacy_reward,
+            'distance_penalty': distance_penalty,
+            'tox_overage': tox_overage,               
+            'toxicity_penalty': toxicity_penalty,     
+            'smoothing_penalty': smoothing_penalty,
+            'terminal_penalty': terminal_penalty,
+            'reward_raw': reward_raw,
+            'reward_scaled': reward_scaled
         }
         
-        return current_obs, reward, terminated, truncated, info
+        return current_obs, reward_scaled, terminated, truncated, info

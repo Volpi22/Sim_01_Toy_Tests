@@ -57,10 +57,9 @@ class DigitalPatientEngine:
     def apply_pharmacodynamics(self, base_ph_array, base_temp_array, mu_B_ph, mu_B_temp, tz_idx, max_ph_offset, max_temp_offset):
         c_safe = self.drug['C_safe']
         
-        # [LOCKED] Moderately increased Emax to counteract physiological delays
+        # [LOCKED] Emax kept at 0.08 to isolate variables during debugging
         e_max = self.drug.get('Emax', 0.08) 
         
-        # [LOCKED] Pathological initialization restored
         if self.real_ph is None:
             self.real_ph = np.copy(mu_B_ph)
             self.real_temp = np.copy(mu_B_temp)
@@ -73,6 +72,7 @@ class DigitalPatientEngine:
         ec50_factor = 0.60 - (0.30 * growth_ratio)
         ec50 = ec50_factor * c_safe
         
+        # [LOCKED] Gamma kept at 4.0
         hill_fraction = (ce_tumor ** self.gamma) / ((ec50 ** self.gamma) + (ce_tumor ** self.gamma) + 1e-8)
         k_eff = 1.0 + 0.2 * np.tanh(self.tumor_mass)
         

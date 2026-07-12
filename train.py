@@ -10,6 +10,7 @@ import optuna
 import matplotlib.pyplot as plt
 from collections import deque
 from environment import PredictiveChemoEnv
+from logger import EpisodeLogger
 
 torch.backends.mkldnn.enabled = False            
 
@@ -46,21 +47,65 @@ class EpisodeReplayBuffer:
     def __len__(self):
         return len(self.buffer)
 
-def evaluate_deterministic_policy(env, policy_net, device, num_seeds=5):
-    total_det_reward = 0.0
+def evaluate_deterministic_policy(env, policy_net, device, num_seeds=15):
+    returns = []
     for seed in range(42, 42 + num_seeds):
         obs, _ = env.reset(seed=seed)
         hidden = None
+        ep_return = 0.0
         for _ in range(240):
             obs_tensor = torch.FloatTensor(obs).view(1, 1, -1).to(device)
             with torch.no_grad():
                 q_vals, hidden = policy_net(obs_tensor, hidden)
                 action = q_vals[0, 0, :].argmax().item()
             obs, reward, terminated, truncated, _ = env.step(action)
-            total_det_reward += reward  
+            ep_return += reward  
             if terminated or truncated:
                 break
-    return total_det_reward / num_seeds
+        returns.append(ep_return)
+    return np.mean(returns), np.std(returns)
+
+def run_telemetry_eval(env, policy_net, device, episode_idx, cancer_name):
+    """Runs a single detailed evaluation and saves the telemetry dashboards."""
+    logger = EpisodeLogger()
+    obs, _ = env.reset(seed=42) # Always evaluate on the same patient for consistency
+    hidden = None
+    terminated, truncated = False, False
+    prev_action = 0
+    
+    while not (terminated or truncated):
+        obs_tensor = torch.FloatTensor(obs).view(1, 1, -1).to(device)
+        with torch.no_grad():
+            q_vals, hidden = policy_net(obs_tensor, hidden)
+            action = q_vals[0, 0, :].argmax().item()
+            
+        next_obs, reward, terminated, truncated, info = env.step(action)
+        
+        # Inject current dose so the logger doesn't have to guess
+        info['current_dose'] = env.action_mapping[action]
+        
+        logger.record(
+            step=env.current_step, 
+            action=action, 
+            prev_action=prev_action, 
+            reward_scaled=reward, 
+            info=info, 
+            terminated=terminated, 
+            truncated=truncated
+        )
+        
+        obs = next_obs
+        prev_action = action
+        
+    df = logger.to_dataframe()
+    save_prefix = f"{cancer_name}_ep{episode_idx}"
+    
+    # Print the Spearman/Pearson correlations to the terminal
+    logger.print_correlations(df)
+    
+    # Save the periodic snapshots
+    logger.save_csv(df, f"results/telemetry/{save_prefix}_log.csv")
+    logger.plot_summary(df, f"results/telemetry/{save_prefix}_summary.png")
 
 def train_drqn_specialist(cancer_name, data_path, total_episodes=1000, trial=None, **kwargs):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -212,13 +257,18 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1000, trial=Non
             print(log_str)
             
         if episode_idx % 50 == 0 and len(buffer) > batch_size:
-            eval_return = evaluate_deterministic_policy(env, policy_net, device, num_seeds=5)
+            # 1. Run the standard fast evaluation for checkpointing
+            eval_mean, eval_std = evaluate_deterministic_policy(env, policy_net, device, num_seeds=15)
             is_best = ""
-            if eval_return > best_eval_return:
-                best_eval_return = eval_return
+            if eval_mean > best_eval_return:
+                best_eval_return = eval_mean
                 torch.save(policy_net.state_dict(), f"models/{cancer_name}_drqn_best.pt")
                 is_best = "  <-- NEW BEST MODEL SAVED"
-            print(f">>> EVALUATION EP {episode_idx:4d} | Det. Return: {eval_return:7.2f}{is_best}")
+            print(f">>> EVALUATION EP {episode_idx:4d} | Det. Return: {eval_mean:7.2f} ± {eval_std:5.2f}{is_best}")
+            
+            # 2. Skip telemetry during Optuna trials to save time, otherwise generate dashboards
+            if trial is None:
+                run_telemetry_eval(env, policy_net, device, episode_idx, cancer_name)
 
     return best_eval_return, training_history 
 

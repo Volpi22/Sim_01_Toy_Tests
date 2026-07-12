@@ -18,3 +18,5 @@ optuna_study_target_diabetes_combined.db
 optuna_study_target_zscore_post_op_combined.db
 optuna_study_target_zscore_diabetes_combined.db
 output_train.txt
+output_eval.txt
+\results

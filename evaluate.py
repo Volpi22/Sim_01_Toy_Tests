@@ -15,34 +15,32 @@ import matplotlib.pyplot as plt
 from environment import PredictiveChemoEnv
 from train import DRQN, CANCER_PROFILES
 
+# Inside evaluate.py
 def run_scenario(env, model, device, scenario_name):
     obs, _ = env.reset()
-    baseline = env.engine.drug['k_elim']
+    
+    # 1. Capture pure baselines
+    baseline_k_elim = env.engine.drug['k_elim']
+    baseline_threshold = env.critical_toxicity_threshold
+    
+    # 2. Reset environment to pure baselines BEFORE applying scenario modifiers
+    env.engine.drug['k_elim'] = baseline_k_elim
+    env.critical_toxicity_threshold = baseline_threshold
+    env.engine.tumor_growth_rate = 0.025
     env.is_resistant = False 
     
-    # [Priority 13] Match Evaluation to Training Distribution (0.015 - 0.035)
+    # 3. Apply scenario-specific mutations
     if scenario_name == "Low Growth (Late-Stage)":
-        env.engine.drug['k_elim'] = baseline
-        env.engine.tumor_growth_rate = 0.005 # OOD Hard Test
-        
+        env.engine.tumor_growth_rate = 0.005 
     elif scenario_name == "Medium Growth (Typical)":
-        env.engine.drug['k_elim'] = baseline
-        env.engine.tumor_growth_rate = 0.025 # Exact middle of training distribution
-        
-    elif scenario_name == "High Growth (Early-Stage)":
-        env.engine.drug['k_elim'] = baseline
-        env.engine.tumor_growth_rate = 0.050 # OOD Hard Test
-        
-    elif scenario_name == "Resistance (Dead-End)":
-        env.engine.drug['k_elim'] = baseline
         env.engine.tumor_growth_rate = 0.025 
+    elif scenario_name == "High Growth (Early-Stage)":
+        env.engine.tumor_growth_rate = 0.050 
+    elif scenario_name == "Resistance (Dead-End)":
         env.is_resistant = True 
-        
     elif scenario_name == "Toxicity (Slippery Road)":
-        env.engine.drug['k_elim'] = baseline
         env.engine.drug['k_elim'] *= 0.50                          
-        env.critical_toxicity_threshold *= 0.75 
-        env.engine.tumor_growth_rate = 0.025
+        env.critical_toxicity_threshold *= 0.75
         
     hidden = None
     terminated = False
@@ -56,11 +54,11 @@ def run_scenario(env, model, device, scenario_name):
     }
     action_counts = np.zeros(10)
     
-    print(f"\n{'-'*90}")
-    print(f" REWARD PROFILER: {scenario_name}")
-    print(f"{'-'*90}")
-    print(f"{'Time':<6} | {'Efficacy':<12} | {'Toxicity':<12} | {'Smooth':<10} | {'Total Reward'}")
-    print(f"{'-'*90}")
+    print(f"\n{'-'*155}")
+    print(f" DEEP DIAGNOSTIC PROFILER: {scenario_name}")
+    print(f"{'-'*155}")
+    print(f"{'Time':<4} | {'Act':<3} | {'Dose':<4} | {'Ce':<5} | {'Hill':<5} | {'Kill':<6} | {'Grow':<6} | {'Mass':<5} | {'dMass':<7} | {'Dist':<5} | {'dDist':<7} | {'Rew':<6} | {'Q-Values (0->9)'}")
+    print(f"{'-'*155}")
 
     while not (terminated or truncated):
         obs_tensor = torch.FloatTensor(obs).view(1, 1, -1).to(device)
@@ -74,11 +72,20 @@ def run_scenario(env, model, device, scenario_name):
         current_tox = next_obs[60] * env.critical_toxicity_threshold
         max_tox_observed = max(max_tox_observed, current_tox)
         
-        if env.current_step % 10 == 0:
-            eff = info['efficacy_reward']
-            tox = info['toxicity_penalty']
-            smooth = info['smoothing_penalty']
-            print(f"t={env.current_step:<4} | {eff:>12.2f} | {tox:>12.2f} | {smooth:>10.2f} | {reward:>12.2f}")
+        # [NEW] Step-by-step diagnostic log 
+        ce = info['Ce']
+        hill = info['hill']
+        kill = info['kill']
+        growth = info['growth']
+        mass = info['mass']
+        dmass = info['delta_mass']
+        dist = info['curr_dist']
+        ddist = info['distance_reduction']
+        
+        q_array = q_vals.squeeze().cpu().numpy()
+        q_str = "[" + ", ".join([f"{q:5.2f}" for q in q_array]) + "]"
+        
+        print(f"{env.current_step:<4} | {action:<3} | {env.current_dose*100:>3.0f}% | {ce:>5.2f} | {hill:>5.2f} | {kill:>6.4f} | {growth:>6.4f} | {mass:>5.3f} | {dmass:>7.4f} | {dist:>5.2f} | {ddist:>7.4f} | {reward:>6.2f} | {q_str}")
         
         history['time'].append(env.current_step)
         history['tumor_ph'].append(info['real_ph'])
@@ -91,9 +98,9 @@ def run_scenario(env, model, device, scenario_name):
         obs = next_obs
         total_reward += reward
         
-    print(f"{'-'*90}")
+    print(f"{'-'*155}")
     print(f"Final Action Distribution: {action_counts.astype(int).tolist()}")
-    print(f"{'-'*90}\n")
+    print(f"{'-'*155}\n")
         
     scenario_threshold = env.critical_toxicity_threshold
     actually_failed = max_tox_observed >= scenario_threshold
