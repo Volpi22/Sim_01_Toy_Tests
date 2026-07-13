@@ -245,7 +245,8 @@ class PredictiveChemoEnv(gym.Env):
             'smoothing_penalty': smoothing_penalty,
             'terminal_penalty': terminal_penalty,
             'reward_raw': reward_raw,
-            'reward_scaled': reward_scaled
+            'reward_scaled': reward_scaled,
+            'survived': not terminated
         }
         
         return current_obs, reward_scaled, terminated, truncated, info

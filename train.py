@@ -1,3 +1,27 @@
+"""
+=============================================================================
+DRQN Training & Optimization Pipeline for Predictive Chemotherapy
+=============================================================================
+Usage Examples:
+--------------
+1. Standard Training (Uses default or previously optimized config):
+    python train.py --cancer Glioblastoma --episodes 1000
+
+2. Hyperparameter Optimization (Runs 30 Optuna trials & saves best config):
+    python train.py --cancer Glioblastoma --optimize
+
+3. Multi-Seed Stability Check (Runs 5 independent full training loops):
+    python train.py --cancer Glioblastoma --stability_check
+    
+CLI Arguments:
+--------------
+  --cancer          [Required] Target clinical profile (e.g., Glioblastoma, Lung_Cancer)
+  --episodes        [Optional] Number of episodes per training run (Default: 1000)
+  --optimize        [Flag]     Triggers Optuna hyperparameter search (300 eps per trial)
+  --stability_check [Flag]     Runs 5 independent training loops to verify robustness
+=============================================================================
+"""
+
 import os
 import json
 import argparse
@@ -65,7 +89,7 @@ def evaluate_deterministic_policy(env, policy_net, device, num_seeds=15):
         returns.append(ep_return)
     return np.mean(returns), np.std(returns)
 
-def run_telemetry_eval(env, policy_net, device, episode_idx, cancer_name):
+def run_telemetry_eval(env, policy_net, device, episode_idx, cancer_name, run_suffix=""):
     """Runs a single detailed evaluation and saves the telemetry dashboards."""
     logger = EpisodeLogger()
     obs, _ = env.reset(seed=42) # Always evaluate on the same patient for consistency
@@ -98,16 +122,17 @@ def run_telemetry_eval(env, policy_net, device, episode_idx, cancer_name):
         prev_action = action
         
     df = logger.to_dataframe()
-    save_prefix = f"{cancer_name}_ep{episode_idx}"
+    save_prefix = f"{cancer_name}{run_suffix}_ep{episode_idx}"
     
     # Print the Spearman/Pearson correlations to the terminal
     logger.print_correlations(df)
     
     # Save the periodic snapshots
+    os.makedirs("results/telemetry", exist_ok=True)
     logger.save_csv(df, f"results/telemetry/{save_prefix}_log.csv")
     logger.plot_summary(df, f"results/telemetry/{save_prefix}_summary.png")
 
-def train_drqn_specialist(cancer_name, data_path, total_episodes=1000, trial=None, **kwargs):
+def train_drqn_specialist(cancer_name, data_path, total_episodes=1000, trial=None, run_suffix="", **kwargs):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env = PredictiveChemoEnv(schedule_parquet_path=data_path, drug_name=CANCER_PROFILES[cancer_name]['drug'], tumor_zone=CANCER_PROFILES[cancer_name]['zone'])
 
@@ -262,13 +287,14 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1000, trial=Non
             is_best = ""
             if eval_mean > best_eval_return:
                 best_eval_return = eval_mean
-                torch.save(policy_net.state_dict(), f"models/{cancer_name}_drqn_best.pt")
+                # Save with run_suffix to avoid overwriting during stability checks
+                torch.save(policy_net.state_dict(), f"models/{cancer_name}_drqn_best{run_suffix}.pt")
                 is_best = "  <-- NEW BEST MODEL SAVED"
             print(f">>> EVALUATION EP {episode_idx:4d} | Det. Return: {eval_mean:7.2f} ± {eval_std:5.2f}{is_best}")
             
             # 2. Skip telemetry during Optuna trials to save time, otherwise generate dashboards
             if trial is None:
-                run_telemetry_eval(env, policy_net, device, episode_idx, cancer_name)
+                run_telemetry_eval(env, policy_net, device, episode_idx, cancer_name, run_suffix=run_suffix)
 
     return best_eval_return, training_history 
 
@@ -283,6 +309,7 @@ def optuna_objective(trial, cancer_name, data_path):
         data_path, 
         total_episodes=300, 
         trial=trial,
+        run_suffix="",  # Default no suffix for optimization
         lr=lr, 
         gamma=gamma, 
         batch_size=batch_size, 
@@ -290,7 +317,7 @@ def optuna_objective(trial, cancer_name, data_path):
     )
     return score
 
-def run_standard_training(cancer_name, data_path, total_episodes, **kwargs):
+def run_standard_training(cancer_name, data_path, total_episodes, run_suffix="", **kwargs):
     print(f"Starting Standard Training for {cancer_name}...")
     if kwargs:
         print(f"Using Parameters: {kwargs}")
@@ -301,6 +328,7 @@ def run_standard_training(cancer_name, data_path, total_episodes, **kwargs):
         cancer_name, 
         data_path, 
         total_episodes=total_episodes, 
+        run_suffix=run_suffix,
         **kwargs
     )
     
@@ -312,25 +340,59 @@ def run_standard_training(cancer_name, data_path, total_episodes, **kwargs):
         moving_avg = np.convolve(history, np.ones(50)/50, mode='valid')
         plt.plot(range(49, len(history)), moving_avg, color='lime', linewidth=2, label='50-Ep Moving Avg')
         
-    plt.title(f"DRQN Training Curve: {cancer_name}")
+    plt.title(f"DRQN Training Curve: {cancer_name}{run_suffix}")
     plt.xlabel("Episode")
     plt.ylabel("Total Scaled Reward")
     plt.legend()
     plt.grid(True, alpha=0.2)
     
     os.makedirs("results", exist_ok=True)
-    plot_path = f"results/{cancer_name}_training_curve.png"
+    plot_path = f"results/{cancer_name}_training_curve{run_suffix}.png"
     plt.savefig(plot_path, dpi=300)
     plt.close()
     
     print(f"[INFO] Training plot saved to {plot_path}")
     print(f"Training Complete. Best Deterministic Return: {best_score}")
+    return best_score
+
+def run_stability_check(cancer_name, data_path, total_episodes, num_runs=5, **kwargs):
+    print(f"\n{'='*80}")
+    print(f" STARTING STABILITY CHECK: {num_runs} INDEPENDENT RUNS FOR {cancer_name}")
+    print(f"{'='*80}\n")
+    
+    scores = []
+    for i in range(1, num_runs + 1):
+        print(f"\n{'-'*40}")
+        print(f" STABILITY RUN {i} / {num_runs}")
+        print(f"{'-'*40}")
+        
+        run_suffix = f"_run{i}"
+        
+        score = run_standard_training(
+            cancer_name, 
+            data_path, 
+            total_episodes=total_episodes, 
+            run_suffix=run_suffix, 
+            **kwargs
+        )
+        scores.append(score)
+        
+    print(f"\n{'='*80}")
+    print(f" STABILITY CHECK COMPLETE FOR {cancer_name}")
+    print(f"{'='*80}")
+    for i, score in enumerate(scores, 1):
+        print(f" Run {i}: {score:.2f}")
+    print(f"----------------------------------------")
+    print(f" Mean Return: {np.mean(scores):.2f} ± {np.std(scores):.2f}")
+    print(f"{'='*80}\n")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--cancer", type=str, choices=list(CANCER_PROFILES.keys()), required=True)
     parser.add_argument("--episodes", type=int, default=1000)
     parser.add_argument("--optimize", action="store_true")
+    parser.add_argument("--stability_check", action="store_true", help="Run multiple independent training runs to verify stability.")
     args = parser.parse_args()
 
     dataset_path = "datasets/1_week_sampling_schedule.parquet"
@@ -341,7 +403,17 @@ if __name__ == "__main__":
         print(f"[ERROR] Dataset not found at {dataset_path}. Please generate it first.")
         exit(1)
 
-    if args.optimize:
+    if args.stability_check:
+        if os.path.exists(param_file):
+            print(f"[INFO] Loading optimized parameters from {param_file}...")
+            with open(param_file, 'r') as f:
+                loaded_params = json.load(f)
+            run_stability_check(args.cancer, dataset_path, args.episodes, num_runs=5, **loaded_params)
+        else:
+            print(f"[WARNING] Parameter file {param_file} not found. Running with hardcoded defaults.")
+            run_stability_check(args.cancer, dataset_path, args.episodes, num_runs=5)
+
+    elif args.optimize:
         print(f"Running Optuna Hyperparameter Optimization for {args.cancer}...")
         study = optuna.create_study(direction='maximize')
         study.optimize(lambda trial: optuna_objective(trial, args.cancer, dataset_path), n_trials=30)

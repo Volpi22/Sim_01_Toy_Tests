@@ -2,8 +2,26 @@
 =============================================================================
 Therapeutic Thermostat: Clinical Evaluation & Stress Testing
 =============================================================================
-Evaluates a trained DRQN specialist against 3 clinical scenarios for visual dashboards,
-or runs a Frozen 100-Patient protocol for rigorous baseline comparison.
+Usage Examples:
+--------------
+1. Visual Dashboard (Single Cancer):
+    python evaluate.py --cancer Glioblastoma
+    
+2. Frozen 100-Patient Protocol (Single Cancer):
+    python evaluate.py --cancer Glioblastoma --frozen
+    
+3. Run Dashboard for ALL Cancer Profiles:
+    python evaluate.py --all
+    
+4. Run Frozen Protocol for ALL Cancer Profiles:
+    python evaluate.py --all --frozen
+    
+CLI Arguments:
+--------------
+  --cancer  [Optional] Target clinical profile (e.g., Glioblastoma, Lung_Cancer)
+  --all     [Flag]     Evaluates all cancer profiles sequentially
+  --frozen  [Flag]     Triggers the 100-patient statistical evaluation mode
+=============================================================================
 """
 
 import os
@@ -107,7 +125,6 @@ def run_scenario(env, model, device, scenario_name):
     
     return history, total_reward, actually_failed, scenario_threshold
 
-# Inside evaluate.py -> Replace the existing run_frozen_ai_evaluation
 def run_frozen_ai_evaluation(cancer_name, model_path, data_path, num_episodes=100):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = DRQN(input_dim=64, num_actions=10).to(device)
@@ -131,20 +148,21 @@ def run_frozen_ai_evaluation(cancer_name, model_path, data_path, num_episodes=10
     scenario_results = []
     raw_episode_data = []
 
+    # [FIX] Capture absolute baseline constants ONCE outside the loops
+    obs, _ = env.reset(seed=42)
+    ABSOLUTE_BASE_K_ELIM = env.engine.drug['k_elim']
+    ABSOLUTE_BASE_THRESHOLD = env.critical_toxicity_threshold
+
     for scenario in scenarios:
         print(f"Running Frozen 100-Patient Protocol for: {scenario}...")
         metrics = {'survivals': [], 'mhr': [], 'mat': [], 'returns': []}
 
         for ep_idx in range(num_episodes):
-            # [LOCKED] Seeded reset to fetch deterministic variations
             obs, _ = env.reset(seed=42 + ep_idx)
             
-            # --- 1. APPLY SCENARIO MODIFIERS ---
-            baseline_k_elim = env.engine.drug['k_elim']
-            baseline_threshold = env.critical_toxicity_threshold
-            
-            env.engine.drug['k_elim'] = baseline_k_elim
-            env.critical_toxicity_threshold = baseline_threshold
+            # [FIX] Reset environment to absolute baselines BEFORE applying scenario modifiers
+            env.engine.drug['k_elim'] = ABSOLUTE_BASE_K_ELIM
+            env.critical_toxicity_threshold = ABSOLUTE_BASE_THRESHOLD
             env.engine.tumor_growth_rate = 0.025
             env.is_resistant = False 
             
@@ -159,16 +177,14 @@ def run_frozen_ai_evaluation(cancer_name, model_path, data_path, num_episodes=10
             elif scenario == "Toxicity (Slippery Road)":
                 env.engine.drug['k_elim'] *= 0.50                          
                 env.critical_toxicity_threshold *= 0.75
-            # -----------------------------------
 
-            # Capture initial Euclidean distance for MHR %
             initial_distance = env.prev_distance
-
             hidden = None
             total_reward = 0.0
             terminated, truncated = False, False
             max_tox_observed = 0.0
             final_distance = initial_distance
+            survived = True 
             
             while not (terminated or truncated):
                 obs_tensor = torch.FloatTensor(obs).view(1, 1, -1).to(device)
@@ -180,23 +196,21 @@ def run_frozen_ai_evaluation(cancer_name, model_path, data_path, num_episodes=10
                 total_reward += reward
                 max_tox_observed = max(max_tox_observed, env.total_toxicity)
                 final_distance = info['curr_dist']
+                survived = info['survived'] # [FIX] Use explicit flag
                 
-            # Calculate Mean Homeostatic Restoration (MHR %)
-            # Clamped at 0 to prevent negative MHR if the tumor actually grew
             mhr_percent = max(0.0, ((initial_distance - final_distance) / initial_distance) * 100.0)
                 
             metrics['returns'].append(total_reward)
-            metrics['survivals'].append(0 if terminated else 1)
+            metrics['survivals'].append(1 if survived else 0)
             metrics['mat'].append(max_tox_observed)
             metrics['mhr'].append(mhr_percent)
             
             raw_episode_data.append({
                 "Policy": "Trained DRQN", "Scenario": scenario, "Episode": ep_idx, "Seed": 42 + ep_idx,
-                "Return": total_reward, "Survival": 0 if terminated else 1,
+                "Return": total_reward, "Survival": 1 if survived else 0,
                 "MHR_Pct": mhr_percent, "MAT_Max_Tox": max_tox_observed
             })
             
-        # Aggregate scenario stats
         scenario_results.append({
             "Scenario": scenario,
             "Accuracy (%)": np.mean(metrics['survivals']) * 100,
@@ -205,7 +219,6 @@ def run_frozen_ai_evaluation(cancer_name, model_path, data_path, num_episodes=10
             "Mean_Return": np.mean(metrics['returns'])
         })
 
-    # --- Print the Academic Table ---
     print(f"\n{'='*95}")
     print(f" FROZEN 100-PATIENT PROTOCOL RESULTS: {cancer_name}")
     print(f"{'='*95}")
@@ -215,7 +228,6 @@ def run_frozen_ai_evaluation(cancer_name, model_path, data_path, num_episodes=10
         print(f"{res['Scenario']:<28} | {res['Accuracy (%)']:>19.1f}% | {res['MHR (%)']:>14.1f}% | {res['MAT']:>15.2f}")
     print(f"{'='*95}\n")
 
-    # Save to CSV
     os.makedirs("results", exist_ok=True)
     pd.DataFrame(scenario_results).to_csv(f"results/{cancer_name}_frozen_metrics_summary.csv", index=False)
     pd.DataFrame(raw_episode_data).to_csv(f"results/{cancer_name}_frozen_raw_episodes.csv", index=False)
