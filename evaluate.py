@@ -107,7 +107,7 @@ def run_scenario(env, model, device, scenario_name):
     
     return history, total_reward, actually_failed, scenario_threshold
 
-# Inside evaluate.py -> run_frozen_ai_evaluation
+# Inside evaluate.py -> Replace the existing run_frozen_ai_evaluation
 def run_frozen_ai_evaluation(cancer_name, model_path, data_path, num_episodes=100):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = DRQN(input_dim=64, num_actions=10).to(device)
@@ -120,69 +120,105 @@ def run_frozen_ai_evaluation(cancer_name, model_path, data_path, num_episodes=10
         tumor_zone=CANCER_PROFILES[cancer_name]['zone']
     )
 
-    metrics = {
-        'returns': [], 'masses': [], 'final_toxs': [], 
-        'max_toxs': [], 'survivals': [], 'cum_doses': []
-    }
+    scenarios = [
+        "Low Growth (Late-Stage)", 
+        "Medium Growth (Typical)", 
+        "High Growth (Early-Stage)", 
+        "Resistance (Dead-End)", 
+        "Toxicity (Slippery Road)"
+    ]
+
+    scenario_results = []
     raw_episode_data = []
 
-    for ep_idx in range(num_episodes):
-        # [LOCKED] Simply rely on the seeded reset to fetch deterministic variations!
-        obs, _ = env.reset(seed=42 + ep_idx)
-        
-        hidden = None
-        total_reward = 0.0
-        terminated, truncated = False, False
-        max_tox_observed = 0.0
-        cumulative_dose = 0.0
-        
-        while not (terminated or truncated):
-            obs_tensor = torch.FloatTensor(obs).view(1, 1, -1).to(device)
-            with torch.no_grad():
-                q_vals, hidden = model(obs_tensor, hidden)
-                action = q_vals[0, 0, :].argmax().item()
-                
-            obs, reward, terminated, truncated, _ = env.step(action)
-            total_reward += reward
-            max_tox_observed = max(max_tox_observed, env.total_toxicity)
-            cumulative_dose += env.current_dose
-            
-        metrics['returns'].append(total_reward)
-        metrics['masses'].append(env.engine.tumor_mass)
-        metrics['final_toxs'].append(env.total_toxicity)
-        metrics['max_toxs'].append(max_tox_observed)
-        metrics['survivals'].append(0 if terminated else 1)
-        metrics['cum_doses'].append(cumulative_dose)
-        
-        raw_episode_data.append({
-            "Policy": "Trained DRQN", "Episode": ep_idx, "Seed": 42 + ep_idx,
-            "Return": total_reward, "Survival": 0 if terminated else 1,
-            "Final_Mass": env.engine.tumor_mass, "Max_Tox": max_tox_observed,
-            "Cumul_Dose": cumulative_dose
-        })
-        
-    mean_ret, std_ret = np.mean(metrics['returns']), np.std(metrics['returns'])
-    mean_mass, std_mass = np.mean(metrics['masses']), np.std(metrics['masses'])
-    mean_mtox, std_mtox = np.mean(metrics['max_toxs']), np.std(metrics['max_toxs'])
-    mean_dose, std_dose = np.mean(metrics['cum_doses']), np.std(metrics['cum_doses'])
-    surv_rate = np.mean(metrics['survivals']) * 100
-    
-    print(f"\n{'Policy':<25} | {'Return (Mean ± Std)':<20} | {'Surv%':<6} | {'Final Mass':<15} | {'Max Tox':<15} | {'Cumul. Dose'}")
-    print(f"{'-'*110}")
-    ret_str = f"{mean_ret:,.0f} ± {std_ret:,.0f}"
-    mass_str = f"{mean_mass:.2f} ± {std_mass:.2f}"
-    tox_str = f"{mean_mtox:.1f} ± {std_mtox:.1f}"
-    dose_str = f"{mean_dose:,.0f} ± {std_dose:,.0f}"
-    print(f"{'Trained DRQN':<25} | {ret_str:>20} | {surv_rate:>5.0f}% | {mass_str:>15} | {tox_str:>15} | {dose_str:>15}")
-    print(f"{'='*110}\n")
+    for scenario in scenarios:
+        print(f"Running Frozen 100-Patient Protocol for: {scenario}...")
+        metrics = {'survivals': [], 'mhr': [], 'mat': [], 'returns': []}
 
+        for ep_idx in range(num_episodes):
+            # [LOCKED] Seeded reset to fetch deterministic variations
+            obs, _ = env.reset(seed=42 + ep_idx)
+            
+            # --- 1. APPLY SCENARIO MODIFIERS ---
+            baseline_k_elim = env.engine.drug['k_elim']
+            baseline_threshold = env.critical_toxicity_threshold
+            
+            env.engine.drug['k_elim'] = baseline_k_elim
+            env.critical_toxicity_threshold = baseline_threshold
+            env.engine.tumor_growth_rate = 0.025
+            env.is_resistant = False 
+            
+            if scenario == "Low Growth (Late-Stage)":
+                env.engine.tumor_growth_rate = 0.005 
+            elif scenario == "Medium Growth (Typical)":
+                env.engine.tumor_growth_rate = 0.025 
+            elif scenario == "High Growth (Early-Stage)":
+                env.engine.tumor_growth_rate = 0.050 
+            elif scenario == "Resistance (Dead-End)":
+                env.is_resistant = True 
+            elif scenario == "Toxicity (Slippery Road)":
+                env.engine.drug['k_elim'] *= 0.50                          
+                env.critical_toxicity_threshold *= 0.75
+            # -----------------------------------
+
+            # Capture initial Euclidean distance for MHR %
+            initial_distance = env.prev_distance
+
+            hidden = None
+            total_reward = 0.0
+            terminated, truncated = False, False
+            max_tox_observed = 0.0
+            final_distance = initial_distance
+            
+            while not (terminated or truncated):
+                obs_tensor = torch.FloatTensor(obs).view(1, 1, -1).to(device)
+                with torch.no_grad():
+                    q_vals, hidden = model(obs_tensor, hidden)
+                    action = q_vals[0, 0, :].argmax().item()
+                    
+                obs, reward, terminated, truncated, info = env.step(action)
+                total_reward += reward
+                max_tox_observed = max(max_tox_observed, env.total_toxicity)
+                final_distance = info['curr_dist']
+                
+            # Calculate Mean Homeostatic Restoration (MHR %)
+            # Clamped at 0 to prevent negative MHR if the tumor actually grew
+            mhr_percent = max(0.0, ((initial_distance - final_distance) / initial_distance) * 100.0)
+                
+            metrics['returns'].append(total_reward)
+            metrics['survivals'].append(0 if terminated else 1)
+            metrics['mat'].append(max_tox_observed)
+            metrics['mhr'].append(mhr_percent)
+            
+            raw_episode_data.append({
+                "Policy": "Trained DRQN", "Scenario": scenario, "Episode": ep_idx, "Seed": 42 + ep_idx,
+                "Return": total_reward, "Survival": 0 if terminated else 1,
+                "MHR_Pct": mhr_percent, "MAT_Max_Tox": max_tox_observed
+            })
+            
+        # Aggregate scenario stats
+        scenario_results.append({
+            "Scenario": scenario,
+            "Accuracy (%)": np.mean(metrics['survivals']) * 100,
+            "MHR (%)": np.mean(metrics['mhr']),
+            "MAT": np.mean(metrics['mat']),
+            "Mean_Return": np.mean(metrics['returns'])
+        })
+
+    # --- Print the Academic Table ---
+    print(f"\n{'='*95}")
+    print(f" FROZEN 100-PATIENT PROTOCOL RESULTS: {cancer_name}")
+    print(f"{'='*95}")
+    print(f"{'Clinical Scenario':<28} | {'Accuracy (Safety %)' :<20} | {'MHR (%)' :<15} | {'MAT (Max Tox)' :<15}")
+    print(f"{'-'*95}")
+    for res in scenario_results:
+        print(f"{res['Scenario']:<28} | {res['Accuracy (%)']:>19.1f}% | {res['MHR (%)']:>14.1f}% | {res['MAT']:>15.2f}")
+    print(f"{'='*95}\n")
+
+    # Save to CSV
     os.makedirs("results", exist_ok=True)
-    pd.DataFrame([{
-        "Policy": "Trained DRQN", "Mean_Return": mean_ret, "Std_Return": std_ret,
-        "Survival_Rate": surv_rate, "Mean_Final_Mass": mean_mass, "Std_Final_Mass": std_mass,
-        "Mean_Max_Tox": mean_mtox, "Std_Max_Tox": std_mtox, "Mean_Cumul_Dose": mean_dose, "Std_Cumul_Dose": std_dose
-    }]).to_csv(f"results/{cancer_name}_DRQN_summary.csv", index=False)
-    pd.DataFrame(raw_episode_data).to_csv(f"results/{cancer_name}_DRQN_raw_episodes.csv", index=False)
+    pd.DataFrame(scenario_results).to_csv(f"results/{cancer_name}_frozen_metrics_summary.csv", index=False)
+    pd.DataFrame(raw_episode_data).to_csv(f"results/{cancer_name}_frozen_raw_episodes.csv", index=False)
 
 def evaluate_specialist(cancer_name, model_path, data_path):
     print(f"\n{'='*80}")

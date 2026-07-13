@@ -239,7 +239,7 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1000, trial=Non
             loss.backward()
             
             lstm_grad_norm = sum(p.grad.data.norm(2).item() ** 2 for p in policy_net.lstm.parameters() if p.grad is not None) ** 0.5
-            torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(policy_net.parameters(), max_norm=5.0)
             optimizer.step()
             
             avg_q = (state_action_values * mask).sum().item() / max(mask.sum().item(), 1.0)
