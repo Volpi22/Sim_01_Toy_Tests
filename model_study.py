@@ -139,6 +139,18 @@ def run_ablation_study(cancer_name, model_path, data_path, num_episodes=100):
     rects1 = ax.bar(x - width/2, intact_vals, width, label='Intact LSTM (Predictive)', color='#3b82c4')
     rects2 = ax.bar(x + width/2, ablated_vals, width, label='Ablated LSTM (Reactive)', color='#f09436')
 
+    # Explicitly showcase the zeros for Intact values
+    for rect, val in zip(rects1, intact_vals):
+        if val == 0.0:
+            ax.text(rect.get_x() + rect.get_width()/2, 1.5, '0', 
+                    ha='center', va='bottom', fontsize=10, color='black', fontweight='bold')
+                    
+    # Explicitly showcase the zeros for Ablated values
+    for rect, val in zip(rects2, ablated_vals):
+        if val == 0.0:
+            ax.text(rect.get_x() + rect.get_width()/2, 1.5, '0', 
+                    ha='center', va='bottom', fontsize=10, color='black', fontweight='bold')
+
     ax.set_ylabel('Scores / Percentages')
     ax.set_title(f'Ablation Study: Impact of Temporal Memory on Clinical Outcomes\n({cancer_name})', fontweight='bold')
     ax.set_xticks(x)

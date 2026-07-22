@@ -1,0 +1,16 @@
+Baseline Type,Scenario,Accuracy (%),MHR (%),MAT,MER
+Tumor-Only Vision,Low Growth (Late-Stage),0.0,10.446158409118652,50.55005205084256,2.2055190796973387
+Tumor-Only Vision,Medium Growth (Typical),0.0,0.0,50.55052704771719,-10.98473920877393
+Tumor-Only Vision,High Growth (Early-Stage),0.0,0.0,50.55052704771719,-18.050436539415678
+Tumor-Only Vision,Resistance (Dead-End),0.0,0.0,50.55052704771719,-13.507574564127284
+Tumor-Only Vision,Toxicity (Slippery Road),0.0,0.0,38.048956342897746,-8.567995761642036
+Clearance-Only Vision,Low Growth (Late-Stage),100.0,0.0,0.0,-14.011605262756348
+Clearance-Only Vision,Medium Growth (Typical),100.0,0.0,0.0,-14.278698921203613
+Clearance-Only Vision,High Growth (Early-Stage),100.0,0.0,0.0,-14.301295280456543
+Clearance-Only Vision,Resistance (Dead-End),100.0,0.0,0.0,-14.429956436157227
+Clearance-Only Vision,Toxicity (Slippery Road),100.0,0.0,0.0,-14.278698921203613
+Standard of Care,Low Growth (Late-Stage),42.0,68.6519546508789,49.517768284563815,27.644626248599526
+Standard of Care,Medium Growth (Typical),42.0,48.99247829735279,49.517768284563815,16.211041594864366
+Standard of Care,High Growth (Early-Stage),42.0,7.254556861519814,49.517768284563815,-9.584296462608938
+Standard of Care,Resistance (Dead-End),42.0,0.0,49.517768284563815,-21.367321335984826
+Standard of Care,Toxicity (Slippery Road),11.0,25.81595449566841,37.52771399487549,8.440617754993855
