@@ -1,6 +1,1 @@
-{
-    "lr": 1e-3,
-    "gamma": 0.99,
-    "batch_size": 16,
-    "epsilon_decay": 0.995
-}
+{"lr": 0.0001735217879605018, "gamma": 0.9970143828159088, "batch_size": 64, "epsilon_decay": 0.9881338934182662}

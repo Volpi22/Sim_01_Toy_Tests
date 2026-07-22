@@ -7,7 +7,7 @@ Usage Examples:
 1. Standard Training (Uses default or previously optimized config):
     python train.py --cancer Glioblastoma --episodes 1000
 
-2. Hyperparameter Optimization (Runs 30 Optuna trials & saves best config):
+2. Hyperparameter Optimization (Runs 20 Optuna trials & saves best config):
     python train.py --cancer Glioblastoma --optimize
 
 3. Multi-Seed Stability Check (Runs 5 independent full training loops):
@@ -17,7 +17,7 @@ CLI Arguments:
 --------------
   --cancer          [Required] Target clinical profile (e.g., Glioblastoma, Lung_Cancer)
   --episodes        [Optional] Number of episodes per training run (Default: 1000)
-  --optimize        [Flag]     Triggers Optuna hyperparameter search (300 eps per trial)
+  --optimize        [Flag]     Triggers Optuna hyperparameter search
   --stability_check [Flag]     Runs 5 independent training loops to verify robustness
 =============================================================================
 """
@@ -92,7 +92,7 @@ def evaluate_deterministic_policy(env, policy_net, device, num_seeds=15):
 def run_telemetry_eval(env, policy_net, device, episode_idx, cancer_name, run_suffix=""):
     """Runs a single detailed evaluation and saves the telemetry dashboards."""
     logger = EpisodeLogger()
-    obs, _ = env.reset(seed=42) # Always evaluate on the same patient for consistency
+    obs, _ = env.reset(seed=42) 
     hidden = None
     terminated, truncated = False, False
     prev_action = 0
@@ -104,8 +104,6 @@ def run_telemetry_eval(env, policy_net, device, episode_idx, cancer_name, run_su
             action = q_vals[0, 0, :].argmax().item()
             
         next_obs, reward, terminated, truncated, info = env.step(action)
-        
-        # Inject current dose so the logger doesn't have to guess
         info['current_dose'] = env.action_mapping[action]
         
         logger.record(
@@ -124,10 +122,7 @@ def run_telemetry_eval(env, policy_net, device, episode_idx, cancer_name, run_su
     df = logger.to_dataframe()
     save_prefix = f"{cancer_name}{run_suffix}_ep{episode_idx}"
     
-    # Print the Spearman/Pearson correlations to the terminal
     logger.print_correlations(df)
-    
-    # Save the periodic snapshots
     os.makedirs("results/telemetry", exist_ok=True)
     logger.save_csv(df, f"results/telemetry/{save_prefix}_log.csv")
     logger.plot_summary(df, f"results/telemetry/{save_prefix}_summary.png")
@@ -148,11 +143,12 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1000, trial=Non
     optimizer = optim.Adam(policy_net.parameters(), lr=lr) 
     buffer = EpisodeReplayBuffer(capacity=500) 
     epsilon, epsilon_min = 1.0, 0.05
+    
     best_eval_return = -float('inf')
+    best_eval_std = 0.0  
     training_history = [] 
     os.makedirs("models", exist_ok=True)
 
-    # [LOCKED] 60-Minute Burn-in + 120-Minute Learning Window
     burn_in = 60
     seq_len = 120
     total_sample_len = burn_in + seq_len
@@ -163,7 +159,9 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1000, trial=Non
         ep_history, ep_actions, episode_reward = [], [], 0.0
 
         for _ in range(240):
-            obs_tensor = torch.FloatTensor(obs).view(1, 1, -1).to(device)
+            # [OPTIMIZED] Prevents unnecessary memory copying
+            obs_tensor = torch.as_tensor(obs, dtype=torch.float32, device=device).view(1, 1, -1)
+            
             if np.random.rand() < epsilon:
                 action = env.action_space.sample()
                 with torch.no_grad(): _, hidden = policy_net(obs_tensor, hidden)
@@ -185,7 +183,9 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1000, trial=Non
 
         if len(buffer) > batch_size:
             samples = buffer.sample(batch_size)
-            optimizer.zero_grad()
+            
+            # [OPTIMIZED] Faster gradient clearing
+            optimizer.zero_grad(set_to_none=True)
             
             state_batch = torch.zeros(batch_size, seq_len + 1, 64, device=device)
             action_batch = torch.zeros(batch_size, seq_len, 1, dtype=torch.long, device=device)
@@ -208,16 +208,19 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1000, trial=Non
                 else:
                     start = random.randint(2 * (max_start // 3), max_start)
                 
+                # [OPTIMIZED] Pre-extract numpy arrays once per sequence to avoid nested list comprehensions
+                seq_obs = np.stack([tr[0] for tr in seq])
+                seq_actions = np.array([tr[1] for tr in seq], dtype=np.int64)
+                seq_rewards = np.array([tr[2] for tr in seq], dtype=np.float32)
+                seq_dones = np.array([tr[4] for tr in seq], dtype=np.float32)
+                
                 actual_burn_in = min(burn_in, actual_len - start)
                 if actual_burn_in > 0:
-                    burn_in_states = (
-                        torch.as_tensor(
-                            np.stack([tr[0] for tr in seq[start:start + actual_burn_in]]),
-                            dtype=torch.float32,
-                            device=device
-                        )
-                        .unsqueeze(0)
-                    )
+                    burn_in_states = torch.as_tensor(
+                        seq_obs[start:start + actual_burn_in], 
+                        dtype=torch.float32, 
+                        device=device
+                    ).unsqueeze(0)
                         
                     with torch.no_grad():
                         _, (h, c) = policy_net(burn_in_states)
@@ -228,24 +231,15 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1000, trial=Non
                 valid_len = min(seq_len, max(0, actual_len - learn_start))
                 
                 if valid_len > 0:
-                    states = np.stack([tr[0] for tr in seq[learn_start:learn_start + valid_len]])
-                    actions = np.array([tr[1] for tr in seq[learn_start:learn_start + valid_len]], dtype=np.int64)
-                    rewards = np.array([tr[2] for tr in seq[learn_start:learn_start + valid_len]], dtype=np.float32)
-                    dones = np.array([tr[4] for tr in seq[learn_start:learn_start + valid_len]], dtype=np.float32)
-
-                    state_batch[b, :valid_len] = torch.as_tensor(states, dtype=torch.float32, device=device)
-                    action_batch[b, :valid_len, 0] = torch.as_tensor(actions, device=device)
-                    reward_batch[b, :valid_len] = torch.as_tensor(rewards, device=device)
-                    done_batch[b, :valid_len] = torch.as_tensor(dones, device=device)
+                    state_batch[b, :valid_len] = torch.as_tensor(seq_obs[learn_start:learn_start + valid_len], dtype=torch.float32, device=device)
+                    action_batch[b, :valid_len, 0] = torch.as_tensor(seq_actions[learn_start:learn_start + valid_len], device=device)
+                    reward_batch[b, :valid_len] = torch.as_tensor(seq_rewards[learn_start:learn_start + valid_len], device=device)
+                    done_batch[b, :valid_len] = torch.as_tensor(seq_dones[learn_start:learn_start + valid_len], device=device)
                     mask[b, :valid_len] = 1.0  
 
                 if valid_len > 0:
                     last_transition = seq[learn_start + valid_len - 1]
-                    state_batch[b, valid_len] = torch.as_tensor(
-                        last_transition[3],
-                        dtype=torch.float32,
-                        device=device
-                    )
+                    state_batch[b, valid_len] = torch.as_tensor(last_transition[3], dtype=torch.float32, device=device)
 
             hidden_in = (h_0, c_0)
             all_q_values, _ = policy_net(state_batch, hidden_in)
@@ -282,40 +276,48 @@ def train_drqn_specialist(cancer_name, data_path, total_episodes=1000, trial=Non
             print(log_str)
             
         if episode_idx % 50 == 0 and len(buffer) > batch_size:
-            # 1. Run the standard fast evaluation for checkpointing
             eval_mean, eval_std = evaluate_deterministic_policy(env, policy_net, device, num_seeds=15)
             is_best = ""
             if eval_mean > best_eval_return:
                 best_eval_return = eval_mean
-                # Save with run_suffix to avoid overwriting during stability checks
+                best_eval_std = eval_std  
                 torch.save(policy_net.state_dict(), f"models/{cancer_name}_drqn_best{run_suffix}.pt")
                 is_best = "  <-- NEW BEST MODEL SAVED"
             print(f">>> EVALUATION EP {episode_idx:4d} | Det. Return: {eval_mean:7.2f} ± {eval_std:5.2f}{is_best}")
             
-            # 2. Skip telemetry during Optuna trials to save time, otherwise generate dashboards
             if trial is None:
                 run_telemetry_eval(env, policy_net, device, episode_idx, cancer_name, run_suffix=run_suffix)
+            
+            if trial is not None:
+                trial.report(eval_mean, episode_idx)
+                if trial.should_prune():
+                    print(f"[OPTUNA] Trial pruned at episode {episode_idx} due to poor performance.")
+                    raise optuna.TrialPruned()
 
-    return best_eval_return, training_history 
+    return best_eval_return, best_eval_std, training_history 
 
 def optuna_objective(trial, cancer_name, data_path):
     lr = trial.suggest_float('lr', 1e-5, 1e-3, log=True)
-    gamma = trial.suggest_float('gamma', 0.90, 0.999)
-    batch_size = trial.suggest_categorical('batch_size', [8, 16, 32])
-    epsilon_decay = trial.suggest_float('epsilon_decay', 0.90, 0.999)
+    gamma = trial.suggest_float('gamma', 0.98, 0.999)
+    # Batch size 8 is removed for stability. Enforcing larger batch updates.
+    batch_size = trial.suggest_categorical('batch_size', [16, 32, 64]) 
+    # Slower decay floor prevents premature exploration end.
+    epsilon_decay = trial.suggest_float('epsilon_decay', 0.985, 0.996)  
     
-    score, _ = train_drqn_specialist(
+    score, std, _ = train_drqn_specialist(
         cancer_name, 
         data_path, 
-        total_episodes=300, 
+        total_episodes=1000, 
         trial=trial,
-        run_suffix="",  # Default no suffix for optimization
+        run_suffix="",  
         lr=lr, 
         gamma=gamma, 
         batch_size=batch_size, 
         epsilon_decay=epsilon_decay
     )
-    return score
+    
+    # The Variance Penalty: Maximize the mean, but heavily punish the variance!
+    return score - std
 
 def run_standard_training(cancer_name, data_path, total_episodes, run_suffix="", **kwargs):
     print(f"Starting Standard Training for {cancer_name}...")
@@ -324,7 +326,7 @@ def run_standard_training(cancer_name, data_path, total_episodes, run_suffix="",
     else:
         print("Using Default Parameters.")
         
-    best_score, history = train_drqn_specialist(
+    best_score, best_std, history = train_drqn_specialist(
         cancer_name, 
         data_path, 
         total_episodes=total_episodes, 
@@ -352,7 +354,7 @@ def run_standard_training(cancer_name, data_path, total_episodes, run_suffix="",
     plt.close()
     
     print(f"[INFO] Training plot saved to {plot_path}")
-    print(f"Training Complete. Best Deterministic Return: {best_score}")
+    print(f"Training Complete. Best Deterministic Return: {best_score} ± {best_std}")
     return best_score
 
 def run_stability_check(cancer_name, data_path, total_episodes, num_runs=5, **kwargs):
@@ -403,6 +405,7 @@ if __name__ == "__main__":
         print(f"[ERROR] Dataset not found at {dataset_path}. Please generate it first.")
         exit(1)
 
+    print("Running on GPU" if torch.cuda.is_available() else "Running on CPU")
     if args.stability_check:
         if os.path.exists(param_file):
             print(f"[INFO] Loading optimized parameters from {param_file}...")
@@ -415,8 +418,12 @@ if __name__ == "__main__":
 
     elif args.optimize:
         print(f"Running Optuna Hyperparameter Optimization for {args.cancer}...")
-        study = optuna.create_study(direction='maximize')
-        study.optimize(lambda trial: optuna_objective(trial, args.cancer, dataset_path), n_trials=30)
+        
+        # Wait 5 trials to get a baseline. Do not prune anyone before episode 100. Check every 50.
+        pruner = optuna.pruners.MedianPruner(n_startup_trials=5, n_warmup_steps=100, interval_steps=50)
+        study = optuna.create_study(direction='maximize', pruner=pruner)
+        
+        study.optimize(lambda trial: optuna_objective(trial, args.cancer, dataset_path), n_trials=20)
         
         best_params = study.best_trial.params
         print(f"\nOptimization Complete! Best Parameters: {best_params}")
@@ -424,8 +431,9 @@ if __name__ == "__main__":
         with open(param_file, 'w') as f:
             json.dump(best_params, f)
             
-        print(f"Saved optimal parameters to {param_file}. Launching full training...")
-        run_standard_training(args.cancer, dataset_path, args.episodes, **best_params)
+        print(f"Saved optimal parameters to {param_file}")
+        # print(f"Saved optimal parameters to {param_file}. Launching full training...")
+        # run_standard_training(args.cancer, dataset_path, args.episodes, **best_params)
 
     else:
         if os.path.exists(param_file):

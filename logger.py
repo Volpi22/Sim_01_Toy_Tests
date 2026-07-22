@@ -47,10 +47,23 @@ class EpisodeLogger:
         
         print(f" {'Feature':<20} | {'Pearson':<10} | {'Spearman':<10}")
         print("-" * 46)
+        
+        # If the reward never changes, no correlations can be calculated
+        if df['Reward_Raw'].nunique() <= 1:
+            print(" [!] Reward_Raw is entirely constant this episode. Correlations are undefined.")
+            return
+
         for col in cols:
             if col == 'Reward_Raw': continue
-            pearson = df['Reward_Raw'].corr(df[col], method='pearson')
-            spearman, _ = spearmanr(df['Reward_Raw'], df[col])
+            
+            # Check if the feature array is constant to prevent division-by-zero warnings
+            if df[col].nunique() <= 1:
+                pearson = float('nan')
+                spearman = float('nan')
+            else:
+                pearson = df['Reward_Raw'].corr(df[col], method='pearson')
+                spearman, _ = spearmanr(df['Reward_Raw'], df[col])
+                
             print(f" {col:<20} | {pearson:>+10.3f} | {spearman:>+10.3f}")
 
     def plot_summary(self, df, save_path):

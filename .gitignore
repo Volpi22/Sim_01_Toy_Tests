@@ -19,4 +19,6 @@ optuna_study_target_zscore_post_op_combined.db
 optuna_study_target_zscore_diabetes_combined.db
 output_train.txt
 output_eval.txt
-\results\telemetry
+test_output.txt
+train_output.txt
+study_output.txt

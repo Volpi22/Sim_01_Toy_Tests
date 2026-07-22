@@ -1,0 +1,28 @@
+CLINICAL STRESS TEST REPORT: Renal_Cell_Carcinoma
+============================================================
+
+--- Low Growth (Late-Stage) ---
+Outcome       : SUCCESS (Safely Managed)
+Total Reward  : 49.26
+Final Toxicity: 20.29 / 50.0
+
+--- Medium Growth (Typical) ---
+Outcome       : SUCCESS (Safely Managed)
+Total Reward  : 40.37
+Final Toxicity: 37.49 / 50.0
+
+--- High Growth (Early-Stage) ---
+Outcome       : SUCCESS (Safely Managed)
+Total Reward  : 22.25
+Final Toxicity: 23.36 / 50.0
+
+--- Resistance (Dead-End) ---
+Outcome       : SUCCESS (Safely Managed)
+Total Reward  : -26.64
+Final Toxicity: 42.29 / 50.0
+
+--- Toxicity (Slippery Road) ---
+Outcome       : SUCCESS (Safely Managed)
+Total Reward  : 45.61
+Final Toxicity: 28.25 / 37.5
+

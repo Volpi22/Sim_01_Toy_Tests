@@ -40,6 +40,7 @@ def run_scenario(env, model, device, scenario_name):
     # 1. Capture pure baselines
     baseline_k_elim = env.engine.drug['k_elim']
     baseline_threshold = env.critical_toxicity_threshold
+    tz_idx = env.tumor_zone - 1  # [NEW] Get the tumor zone index for the observation array
     
     # 2. Reset environment to pure baselines BEFORE applying scenario modifiers
     env.engine.drug['k_elim'] = baseline_k_elim
@@ -105,11 +106,32 @@ def run_scenario(env, model, device, scenario_name):
         
         print(f"{env.current_step:<4} | {action:<3} | {env.current_dose*100:>3.0f}% | {ce:>5.2f} | {hill:>5.2f} | {kill:>6.4f} | {growth:>6.4f} | {mass:>5.3f} | {dmass:>7.4f} | {dist:>5.2f} | {ddist:>7.4f} | {reward:>6.2f} | {q_str}")
         
+        # [NEW] Introduce the alpha and beta variability for the dashboard plots
+        
+        # 1. Pull the EXACT noisy observation the agent saw for the tumor
+        # obs[0:20] is pH, obs[20:40] is Temp
+        noisy_tumor_ph = next_obs[tz_idx]
+        noisy_tumor_temp = next_obs[20 + tz_idx]
+        
+        # 2. Simulate the alpha/beta noise for the clearance organ telemetry
+        def simulate_sensor_noise(true_val, beta, alpha, baseline):
+            # Beta: Precision error (Gaussian noise)
+            val = true_val + np.random.normal(0, beta)
+            # Alpha: Localization error (30% chance to mix with healthy baseline flow)
+            if np.random.rand() < alpha:
+                val = (val + baseline) / 2.0 
+            return val
+            
+        noisy_clearance_ph = simulate_sensor_noise(info['clearance_ph'], beta=0.10, alpha=0.30, baseline=7.4)
+        noisy_clearance_temp = simulate_sensor_noise(info['clearance_temp'], beta=0.01, alpha=0.30, baseline=37.0)
+
         history['time'].append(env.current_step)
-        history['tumor_ph'].append(info['real_ph'])
-        history['tumor_temp'].append(info['real_temp'])
-        history['clearance_temp'].append(info['clearance_temp'])
-        history['clearance_ph'].append(info['clearance_ph']) 
+        
+        # [UPDATED] Append the noisy data instead of the flat ground truth
+        history['tumor_ph'].append(noisy_tumor_ph)
+        history['tumor_temp'].append(noisy_tumor_temp)
+        history['clearance_temp'].append(noisy_clearance_temp)
+        history['clearance_ph'].append(noisy_clearance_ph) 
         history['toxicity'].append(next_obs[60] * env.critical_toxicity_threshold) 
         history['dose'].append(next_obs[61] * 100)
         
@@ -216,7 +238,7 @@ def run_frozen_ai_evaluation(cancer_name, model_path, data_path, num_episodes=10
             "Accuracy (%)": np.mean(metrics['survivals']) * 100,
             "MHR (%)": np.mean(metrics['mhr']),
             "MAT": np.mean(metrics['mat']),
-            "Mean_Return": np.mean(metrics['returns'])
+            "MER": np.mean(metrics['returns'])
         })
 
     print(f"\n{'='*95}")
