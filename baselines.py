@@ -1,14 +1,14 @@
 """
 =============================================================================
-Therapeutic Thermostat: Baseline & Spatial Ablation Evaluation
+Therapeutic Thermostat: Clinical Baselines Evaluation
 =============================================================================
-This script proves the necessity of a spatially-aware, closed-loop AI by 
-evaluating three definitive clinical baselines:
+This script evaluates the clinical anchors against which the AI is compared:
 
-1. Tumor-Only Vision: DRQN is blinded to clearance organ toxicity.
-2. Clearance-Only Vision: DRQN is blinded to localized tumor growth.
-3. Standard of Care (SOC): A static, clinically-optimized dose with a 
+1. Standard of Care (SOC): A static, clinically-optimized dose with a 
    simulated "Nurse Emergency Abort" if vitals crash.
+2. Adaptive Therapy: A dynamic, rule-based clinical protocol that balances 
+   tumor burden and Treatment-Related Adverse Events (TRAEs) by escalating, 
+   de-escalating, and employing intermittent drug holidays.
 
 Usage Example:
 --------------
@@ -16,17 +16,16 @@ Usage Example:
 
 Outputs:
 --------------
-    - results/<Cancer_Name>_baselines_summary.csv
+    - results/<Cancer_Name>_clinical_baselines_summary.csv
 =============================================================================
 """
 
 import os
 import argparse
-import torch
 import numpy as np
 import pandas as pd
 from environment import PredictiveChemoEnv
-from train import DRQN, CANCER_PROFILES
+from train import CANCER_PROFILES
 
 def find_optimal_static_dose(env, num_seeds=10):
     """
@@ -70,44 +69,8 @@ def find_optimal_static_dose(env, num_seeds=10):
     print(f"{'-'*80}\n")
     return best_action
 
-def mask_observation(obs, mode, env):
-    """
-    Masks the 64-dimensional observation tensor by zeroing out telemetry
-    outside the permitted spatial zones to simulate traditional sensor limits.
-    """
-    masked = np.zeros_like(obs)
-    tz_idx = env.tumor_zone - 1
-    cz_idx = env.engine.drug['clearance_zone'] - 1
-    
-    if mode == "Tumor-Only Vision":
-        # Keep tumor spatial data (pH, Temp, local tox)
-        masked[tz_idx] = obs[tz_idx]
-        masked[20 + tz_idx] = obs[20 + tz_idx]
-        masked[40 + tz_idx] = obs[40 + tz_idx]
-        # Keep generic globals (dose, clearance factor)
-        masked[61] = obs[61] 
-        masked[63] = obs[63]
-        # Purposely blinding global toxicity (60) and clearance conc (62)
-        
-    elif mode == "Clearance-Only Vision":
-        # Keep clearance spatial data (pH, Temp, local tox)
-        masked[cz_idx] = obs[cz_idx]
-        masked[20 + cz_idx] = obs[20 + cz_idx]
-        masked[40 + cz_idx] = obs[40 + cz_idx]
-        # Keep global tox data
-        masked[60] = obs[60]
-        masked[61] = obs[61]
-        masked[62] = obs[62]
-        masked[63] = obs[63]
-        
-    return masked
 
-def run_baselines(cancer_name, model_path, data_path, num_episodes=100):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = DRQN(input_dim=64, num_actions=10).to(device)
-    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
-    model.eval()
-
+def run_baselines(cancer_name, data_path, num_episodes=100):
     env = PredictiveChemoEnv(
         schedule_parquet_path=data_path, 
         drug_name=CANCER_PROFILES[cancer_name]['drug'], 
@@ -122,7 +85,7 @@ def run_baselines(cancer_name, model_path, data_path, num_episodes=100):
         "Toxicity (Slippery Road)"
     ]
     
-    modes = ["Tumor-Only Vision", "Clearance-Only Vision", "Standard of Care"]
+    modes = ["Standard of Care", "Adaptive Therapy"]
     scenario_results = []
 
     # Capture absolute baseline constants once
@@ -135,7 +98,7 @@ def run_baselines(cancer_name, model_path, data_path, num_episodes=100):
     
     for mode in modes:
         print(f"\n{'='*80}")
-        print(f" EVALUATING BASELINE: {mode}")
+        print(f" EVALUATING CLINICAL BASELINE: {mode}")
         print(f"{'='*80}")
         
         for scenario in scenarios:
@@ -163,31 +126,40 @@ def run_baselines(cancer_name, model_path, data_path, num_episodes=100):
                     env.critical_toxicity_threshold *= 0.75
 
                 initial_distance = env.prev_distance
-                hidden = None
                 total_reward = 0.0
                 terminated, truncated = False, False
                 max_tox_observed = 0.0
                 final_distance = initial_distance
                 survived = True 
                 
-                # Emergency Abort Threshold (90% of Critical Limit) for SOC
+                # Baseline State Variables
                 abort_threshold = env.critical_toxicity_threshold * 0.90
                 emergency_aborted = False
+                adaptive_action = optimal_soc_action
                 
                 while not (terminated or truncated):
                     
-                    if mode in ["Tumor-Only Vision", "Clearance-Only Vision"]:
-                        # Mask the observation and use DRQN
-                        obs_masked = mask_observation(obs, mode, env)
-                        obs_tensor = torch.FloatTensor(obs_masked).view(1, 1, -1).to(device)
-                        with torch.no_grad():
-                            q_vals, hidden = model(obs_tensor, hidden)
-                            action = q_vals[0, 0, :].argmax().item()
-                    else:
-                        # Standard of Care (Static Action + Abort)
+                    if mode == "Standard of Care":
+                        # Standard of Care (Static Action + Emergency Abort)
                         if env.total_toxicity >= abort_threshold:
                             emergency_aborted = True
                         action = 0 if emergency_aborted else optimal_soc_action
+                        
+                    elif mode == "Adaptive Therapy":
+                        # Adaptive Therapy (Balanced Triangle: Tumor Burden vs TRAEs)
+                        holiday_threshold = env.critical_toxicity_threshold * 0.85
+                        deescalate_threshold = env.critical_toxicity_threshold * 0.65
+                        escalate_threshold = env.critical_toxicity_threshold * 0.40
+                        
+                        # Apply rules based on continuous physiological feedback
+                        if env.total_toxicity >= holiday_threshold:
+                            adaptive_action = 0  # Intermittent Strategy (Drug Holiday)
+                        elif env.total_toxicity >= deescalate_threshold:
+                            adaptive_action = max(1, adaptive_action - 1)  # De-escalation
+                        elif env.total_toxicity < escalate_threshold and env.prev_distance > 0.5:
+                            adaptive_action = min(9, adaptive_action + 1)  # Escalation (High Burden + Safe Vitals)
+                            
+                        action = adaptive_action
                         
                     obs, reward, terminated, truncated, info = env.step(action)
                     total_reward += reward
@@ -221,7 +193,7 @@ def run_baselines(cancer_name, model_path, data_path, num_episodes=100):
     # Save to CSV
     os.makedirs("results", exist_ok=True)
     df_results = pd.DataFrame(scenario_results)
-    csv_path = f"results/{cancer_name}_baselines_summary.csv"
+    csv_path = f"results/{cancer_name}_clinical_baselines_summary.csv"
     df_results.to_csv(csv_path, index=False)
     
     print(f"\n{'='*80}")
@@ -234,9 +206,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     dataset_path = "datasets/1_week_sampling_schedule.parquet"
-    model_path = f"models/{args.cancer}_drqn_best.pt"
-    
-    if not os.path.exists(model_path):
-        print(f"[ERROR] Could not find {model_path}. Ensure the DRQN is trained first.")
-    else:
-        run_baselines(args.cancer, model_path, dataset_path, num_episodes=100)
+    run_baselines(args.cancer, dataset_path, num_episodes=100)
